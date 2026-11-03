@@ -5,13 +5,36 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { db, auth, obterNomeColecao, obterNomeProfissional } from '../firebase';
 import { GoogleGenerativeAI, GoogleGenerativeAIFetchError } from '@google/generative-ai';
 
-const DATA_HOJE_PADRAO = new Date().toLocaleDateString('pt-BR');
+const obterDataHojeBR = () => {
+  const hoje = new Date();
+  const d = String(hoje.getDate()).padStart(2, '0');
+  const m = String(hoje.getMonth() + 1).padStart(2, '0');
+  const y = hoje.getFullYear();
+  return `${d}/${m}/${y}`;
+};
+
+const converterBRParaISO = (dataBR) => {
+  if (!dataBR || !dataBR.includes('/')) return '';
+  const [d, m, y] = dataBR.split('/');
+  if (!d || !m || !y) return '';
+  return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+};
+
+const converterISOParaBR = (dataISO) => {
+  if (!dataISO || !dataISO.includes('-')) return '';
+  const [y, m, d] = dataISO.split('-');
+  if (!d || !m || !y) return '';
+  return `${d}/${m}/${y}`;
+};
+
+const DATA_HOJE_PADRAO = obterDataHojeBR();
 
 export default function Sessao() {
   const { id } = useParams(); 
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const horaVindaDaUrl = searchParams.get('hora') || '';
+  const dataVindaDaUrl = searchParams.get('data') || '';
 
   const [colecaoAtual, setColecaoAtual] = useState(obterNomeColecao());
   const [nomeProfissional, setNomeProfissional] = useState(obterNomeProfissional());
@@ -27,6 +50,7 @@ export default function Sessao() {
   const [agendamentosPaciente, setAgendamentosPaciente] = useState([]);
   const [posicaoTabuleiro, setPosicaoTabuleiro] = useState(1); 
   
+  const [dataSessao, setDataSessao] = useState(dataVindaDaUrl || DATA_HOJE_PADRAO);
   const [horaInicio, setHoraInicio] = useState(''); 
   const [horaFim, setHoraFim] = useState(''); 
   const [observacoesSessao, setObservacoesSessao] = useState('');
@@ -144,17 +168,28 @@ export default function Sessao() {
         setObservacoesSessao(dados.observacoesTemp || '');
         setHoraFim(dados.horaFimTemp || '');
 
-        // Ordena os agendamentos de hoje por horário
-        const agendamentosHojeOrdenados = (dados.agendamentos || [])
-          .filter(a => a.data === DATA_HOJE_PADRAO && a.hora)
+        // Prioridade da Data: 1º Data vinda da Agenda na URL | 2º Data temporária salva na sessão | 3º Data de hoje
+        const dataEscolhida = dataVindaDaUrl || dados.dataSessaoTemp || DATA_HOJE_PADRAO;
+        setDataSessao(dataEscolhida);
+
+        // Ordena os agendamentos da data ativa por horário
+        const agendamentosNaDataOrdenados = (dados.agendamentos || [])
+          .filter(a => a.data === dataEscolhida && a.hora)
           .sort((a, b) => a.hora.localeCompare(b.hora));
 
-        // Prioridade: 1º Horário vindo da Agenda na URL | 2º Horário já em andamento na sessão | 3º Primeiro agendamento pendente de hoje
-        const horaEscolhida = horaVindaDaUrl || dados.horaInicioTemp || (agendamentosHojeOrdenados[0]?.hora || '');
+        // Prioridade do Horário: 1º Horário vindo da Agenda na URL | 2º Horário em andamento | 3º Primeiro agendamento pendente da data
+        const horaEscolhida = horaVindaDaUrl || dados.horaInicioTemp || (agendamentosNaDataOrdenados[0]?.hora || '');
         setHoraInicio(horaEscolhida);
 
+        const atualizacoesTemp = {};
+        if (dataEscolhida && dados.dataSessaoTemp !== dataEscolhida) {
+          atualizacoesTemp.dataSessaoTemp = dataEscolhida;
+        }
         if (horaEscolhida && dados.horaInicioTemp !== horaEscolhida) {
-          updateDoc(doc(db, colecaoAtual, id), { horaInicioTemp: horaEscolhida }).catch(() => {});
+          atualizacoesTemp.horaInicioTemp = horaEscolhida;
+        }
+        if (Object.keys(atualizacoesTemp).length > 0) {
+          updateDoc(doc(db, colecaoAtual, id), atualizacoesTemp).catch(() => {});
         }
 
         if (dados.historico && Array.isArray(dados.historico)) {
@@ -187,32 +222,37 @@ export default function Sessao() {
       }
     });
     return () => unsubscribe();
-  }, [id, colecaoAtual, horaVindaDaUrl]);
+  }, [id, colecaoAtual, horaVindaDaUrl, dataVindaDaUrl]);
 
-  // Agendamentos de hoje desta criança (para exibir seletor rápido caso haja mais de 1 no mesmo dia)
-  const agendamentosHojeDaCrianca = agendamentosPaciente
-    .filter(a => a.data === DATA_HOJE_PADRAO && a.hora)
+  const dataAtivaBR = dataSessao || DATA_HOJE_PADRAO;
+
+  // Agendamentos desta criança na data ativa (para exibir seletor rápido caso haja mais de 1 no mesmo dia)
+  const agendamentosDaDataDaCrianca = agendamentosPaciente
+    .filter(a => a.data === dataAtivaBR && a.hora)
     .sort((a, b) => a.hora.localeCompare(b.hora));
 
   // O horário de referência do atendimento atual é SEMPRE o horaInicio ativo na tela
   const horarioConjuntoRef = horaInicio;
 
-  // Busca outras crianças que estão agendadas ou já concluíram sessão hoje neste EXATO horário (horarioConjuntoRef)
+  // Busca outras crianças agendadas ou que já concluíram sessão na MESMA DATA e HORÁRIO (dataAtivaBR + horarioConjuntoRef)
   const colegasEmConjunto = horarioConjuntoRef
     ? todosPacientes
         .filter(outro => outro.id !== id)
         .map(outro => {
           const aindaAgendado = (outro.agendamentos || []).some(
-            a => a.data === DATA_HOJE_PADRAO && a.hora === horarioConjuntoRef
+            a => a.data === dataAtivaBR && a.hora === horarioConjuntoRef
           );
-          const jaConcluidoHojeNesseHorario = (outro.historico || []).some(
-            h => h.data && h.data.startsWith(`${DATA_HOJE_PADRAO} - ${horarioConjuntoRef}`)
+          const jaConcluidoNesseHorario = (outro.historico || []).some(
+            h => h.data && (
+              h.data.startsWith(`${dataAtivaBR} - ${horarioConjuntoRef}`) ||
+              h.data.startsWith(`${dataAtivaBR} - A partir das ${horarioConjuntoRef}`)
+            )
           );
-          if (!aindaAgendado && !jaConcluidoHojeNesseHorario) return null;
+          if (!aindaAgendado && !jaConcluidoNesseHorario) return null;
           return {
             ...outro,
             aindaAgendado,
-            jaConcluido: jaConcluidoHojeNesseHorario && !aindaAgendado
+            jaConcluido: jaConcluidoNesseHorario && !aindaAgendado
           };
         })
         .filter(Boolean)
@@ -233,7 +273,7 @@ export default function Sessao() {
     await salvarTextoNoBanco();
     setHistoriaGerada('');
     setModalIAAberto(false);
-    navigate(`/sessao/${colega.id}?hora=${encodeURIComponent(horarioConjuntoRef)}`);
+    navigate(`/sessao/${colega.id}?data=${encodeURIComponent(dataAtivaBR)}&hora=${encodeURIComponent(horarioConjuntoRef)}`);
   };
 
   const toggleGravacao = async () => {
@@ -250,6 +290,23 @@ export default function Sessao() {
       reconhecedorRef.current.start();
       setIsGravando(true);
     }
+  };
+
+  const handleMudarDataSessao = async (valorISO) => {
+    const novaDataBR = converterISOParaBR(valorISO) || DATA_HOJE_PADRAO;
+    setDataSessao(novaDataBR);
+
+    const agendamentosDaqueleDia = agendamentosPaciente
+      .filter(a => a.data === novaDataBR && a.hora)
+      .sort((a, b) => a.hora.localeCompare(b.hora));
+
+    const atualizacoes = { dataSessaoTemp: novaDataBR };
+    if (agendamentosDaqueleDia.length > 0 && !agendamentosDaqueleDia.some(a => a.hora === horaInicio)) {
+      setHoraInicio(agendamentosDaqueleDia[0].hora);
+      atualizacoes.horaInicioTemp = agendamentosDaqueleDia[0].hora;
+    }
+
+    await updateDoc(doc(db, obterNomeColecao(), id), atualizacoes);
   };
 
   const handleMudarHoraInicio = async (val) => {
@@ -382,17 +439,20 @@ export default function Sessao() {
   };
 
   const handleEncerrarSessao = async () => {
-    const confirmacao = window.confirm("Deseja encerrar esta sessão e salvar no histórico?");
+    const confirmacao = window.confirm(`Deseja encerrar esta sessão (data: ${dataAtivaBR}) e salvar no histórico?`);
     if (!confirmacao) return;
 
-    // Se já existir uma sessão salva hoje neste mesmo horário para esta criança, avisa antes de duplicar
+    // Se já existir uma sessão salva nesta mesma data e horário para esta criança, avisa antes de duplicar
     if (horaInicio) {
       const jaTemSessaoNesseHorario = historicoPaciente.some(
-        h => h.data && h.data.startsWith(`${DATA_HOJE_PADRAO} - ${horaInicio}`)
+        h => h.data && (
+          h.data.startsWith(`${dataAtivaBR} - ${horaInicio}`) ||
+          h.data.startsWith(`${dataAtivaBR} - A partir das ${horaInicio}`)
+        )
       );
       if (jaTemSessaoNesseHorario) {
         const confirmarDuplicada = window.confirm(
-          `⚠️ Já existe uma sessão concluída hoje às ${horaInicio} para ${nomePaciente}. Deseja salvar mais um registro neste mesmo horário mesmo assim?`
+          `⚠️ Já existe uma sessão concluída em ${dataAtivaBR} às ${horaInicio} para ${nomePaciente}. Deseja salvar mais um registro neste mesmo horário mesmo assim?`
         );
         if (!confirmarDuplicada) return;
       }
@@ -402,11 +462,13 @@ export default function Sessao() {
       reconhecedorRef.current.stop();
     }
 
-    let dataComHorario = DATA_HOJE_PADRAO;
+    let dataComHorario = dataAtivaBR;
     if (horaInicio && horaFim) {
-      dataComHorario = `${DATA_HOJE_PADRAO} - ${horaInicio} às ${horaFim}`;
+      dataComHorario = `${dataAtivaBR} - ${horaInicio} às ${horaFim}`;
     } else if (horaInicio) {
-      dataComHorario = `${DATA_HOJE_PADRAO} - A partir das ${horaInicio}`;
+      dataComHorario = `${dataAtivaBR} - A partir das ${horaInicio}`;
+    } else if (horaFim) {
+      dataComHorario = `${dataAtivaBR} - Até às ${horaFim}`;
     }
 
     const novoIdSessao = historicoPaciente.reduce(
@@ -428,15 +490,15 @@ export default function Sessao() {
       ...(nomesColegasConjunto ? { emConjuntoCom: nomesColegasConjunto } : {})
     };
 
-    // Remove apenas o agendamento correspondente a este horário de hoje
-    const agendamentosHoje = agendamentosPaciente.filter(a => a.data === DATA_HOJE_PADRAO);
+    // Remove o agendamento correspondente a esta data e horário na Agenda Clínica
+    const agendamentosDaData = agendamentosPaciente.filter(a => a.data === dataAtivaBR);
     const agendamentosRestantes = agendamentosPaciente.filter(a => {
-      if (a.data !== DATA_HOJE_PADRAO) return true;
+      if (a.data !== dataAtivaBR) return true;
       if (horaInicio) {
         return a.hora !== horaInicio;
       }
-      if (agendamentosHoje.length > 1) {
-        return a.id !== agendamentosHoje[0].id;
+      if (agendamentosDaData.length > 1) {
+        return a.id !== agendamentosDaData[0].id;
       }
       return false;
     });
@@ -450,6 +512,7 @@ export default function Sessao() {
         rotina: [],
         posicaoTabuleiro: 1,
         observacoesTemp: '',
+        dataSessaoTemp: '',
         horaInicioTemp: '',
         horaFimTemp: ''
       });
@@ -459,10 +522,10 @@ export default function Sessao() {
 
       if (colegaAindaAtivo) {
         const irParaColega = window.confirm(
-          `Sessão de ${nomePaciente} salva com sucesso!\n\nDeseja ir agora para a sessão em aberto de ${colegaAindaAtivo.nome} (atendimento em conjunto das ${horarioConjuntoRef})?`
+          `Sessão de ${nomePaciente} salva com sucesso!\n\nDeseja ir agora para a sessão em aberto de ${colegaAindaAtivo.nome} (atendimento em conjunto de ${dataAtivaBR} às ${horarioConjuntoRef})?`
         );
         if (irParaColega) {
-          navigate(`/sessao/${colegaAindaAtivo.id}?hora=${encodeURIComponent(horarioConjuntoRef)}`);
+          navigate(`/sessao/${colegaAindaAtivo.id}?data=${encodeURIComponent(dataAtivaBR)}&hora=${encodeURIComponent(horarioConjuntoRef)}`);
           return;
         }
       }
@@ -503,11 +566,11 @@ export default function Sessao() {
               </div>
             </div>
 
-            {/* SÓ APARECE QUANDO O HORÁRIO ATUAL (horaInicio) É EM CONJUNTO COM OUTRA CRIANÇA */}
+            {/* SÓ APARECE QUANDO A DATA E O HORÁRIO ATUAL SÃO EM CONJUNTO COM OUTRA CRIANÇA */}
             {colegasEmConjunto.length > 0 && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', justifyContent: 'center' }}>
                 <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#b45309', backgroundColor: '#fef3c7', padding: '4px 10px', borderRadius: '12px' }}>
-                  👥 Em conjunto ({horarioConjuntoRef}):
+                  👥 Em conjunto ({dataAtivaBR} • {horarioConjuntoRef}):
                 </span>
                 {colegasEmConjunto.map(colega => (
                   colega.jaConcluido ? (
@@ -677,13 +740,13 @@ export default function Sessao() {
           </div>
 
           <div style={{ marginBottom: '25px', textAlign: 'center' }}>
-            <p style={{ margin: '0 0 10px 0', color: '#4a5568', fontWeight: 'bold', fontSize: '18px' }}>Horário do Atendimento</p>
+            <p style={{ margin: '0 0 10px 0', color: '#4a5568', fontWeight: 'bold', fontSize: '18px' }}>Data e Horário do Atendimento</p>
 
-            {/* Se houver mais de 1 agendamento para hoje (ex: 18:00 e 19:00), mostra botões para escolher qual está atendendo */}
-            {agendamentosHojeDaCrianca.length > 1 && (
+            {/* Se houver mais de 1 agendamento para a data ativa, mostra botões para escolher qual está atendendo */}
+            {agendamentosDaDataDaCrianca.length > 1 && (
               <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '13px', color: '#64748b', fontWeight: 'bold' }}>Agendados hoje:</span>
-                {agendamentosHojeDaCrianca.map(agd => (
+                <span style={{ fontSize: '13px', color: '#64748b', fontWeight: 'bold' }}>Agendados em {dataAtivaBR}:</span>
+                {agendamentosDaDataDaCrianca.map(agd => (
                   <button
                     key={agd.id}
                     type="button"
@@ -705,9 +768,34 @@ export default function Sessao() {
               </div>
             )}
 
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '15px' }}>
-              <input type="time" value={horaInicio} onChange={(e) => handleMudarHoraInicio(e.target.value)} style={{ padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', fontSize: '16px' }} />
-              <input type="time" value={horaFim} onChange={(e) => handleMudarHoraFim(e.target.value)} style={{ padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', fontSize: '16px' }} />
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold', marginBottom: '3px' }}>Data:</span>
+                <input
+                  type="date"
+                  value={converterBRParaISO(dataAtivaBR)}
+                  onChange={(e) => handleMudarDataSessao(e.target.value)}
+                  style={{ padding: '11px 12px', borderRadius: '12px', border: '1px solid #cbd5e1', fontSize: '15px', fontFamily: 'sans-serif' }}
+                />
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold', marginBottom: '3px' }}>Início:</span>
+                <input
+                  type="time"
+                  value={horaInicio}
+                  onChange={(e) => handleMudarHoraInicio(e.target.value)}
+                  style={{ padding: '11px 12px', borderRadius: '12px', border: '1px solid #cbd5e1', fontSize: '16px' }}
+                />
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold', marginBottom: '3px' }}>Término:</span>
+                <input
+                  type="time"
+                  value={horaFim}
+                  onChange={(e) => handleMudarHoraFim(e.target.value)}
+                  style={{ padding: '11px 12px', borderRadius: '12px', border: '1px solid #cbd5e1', fontSize: '16px' }}
+                />
+              </div>
             </div>
           </div>
 

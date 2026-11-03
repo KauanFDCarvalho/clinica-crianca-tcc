@@ -256,6 +256,8 @@ export default function Agenda() {
     }
   });
 
+  const isDiaModalPassado = verificarSePassou(diaSelecionado);
+
   return (
     <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #cde4ff 0%, #d8f5d4 100%)', padding: isMobile ? '10px' : '30px', fontFamily: 'sans-serif' }}>
       <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
@@ -312,6 +314,7 @@ export default function Agenda() {
                 const dia = index + 1;
                 const dataStringStr = formatarDataBR(dia);
                 const isHoje = dia === DATA_INICIAL_AGENDA.getDate() && mes === DATA_INICIAL_AGENDA.getMonth() && ano === DATA_INICIAL_AGENDA.getFullYear();
+                const diaPassou = verificarSePassou(dataStringStr);
 
                 const pacientesAtendidos = [];
                 const pacientesAgendados = [];
@@ -352,9 +355,9 @@ export default function Agenda() {
                         </div>
                       ))}
                       {pacientesAgendados.map(pac => (
-                        <div key={`a-${pac.id}`} title={`Agendado: ${pac.nome}`} style={{ position: 'relative' }}>
-                          <div style={{ width: isMobile ? '18px' : '30px', height: isMobile ? '18px' : '30px', borderRadius: '50%', backgroundColor: '#eff6ff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: isMobile ? '10px' : '18px', border: '1px solid #3b82f6' }}>{pac.avatar}</div>
-                          <div style={{ position: 'absolute', bottom: '-2px', right: '-2px', backgroundColor: '#3b82f6', width: isMobile ? '10px' : '14px', height: isMobile ? '10px' : '14px', borderRadius: '50%', border: '1px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: isMobile ? '6px' : '9px', color: '#fff', fontWeight: 'bold' }}>🕒</div>
+                        <div key={`a-${pac.id}`} title={diaPassou ? `Pendente (Não concluído): ${pac.nome}` : `Agendado: ${pac.nome}`} style={{ position: 'relative' }}>
+                          <div style={{ width: isMobile ? '18px' : '30px', height: isMobile ? '18px' : '30px', borderRadius: '50%', backgroundColor: diaPassou ? '#fef2f2' : '#eff6ff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: isMobile ? '10px' : '18px', border: diaPassou ? '1px solid #ef4444' : '1px solid #3b82f6' }}>{pac.avatar}</div>
+                          <div style={{ position: 'absolute', bottom: '-2px', right: '-2px', backgroundColor: diaPassou ? '#ef4444' : '#3b82f6', width: isMobile ? '10px' : '14px', height: isMobile ? '10px' : '14px', borderRadius: '50%', border: '1px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: isMobile ? '7px' : '9px', color: '#fff', fontWeight: 'bold' }}>{diaPassou ? '!' : '🕒'}</div>
                         </div>
                       ))}
                     </div>
@@ -378,7 +381,7 @@ export default function Agenda() {
                 <div>
                   <h3 style={{ margin: '0 0 5px 0', color: '#2c3e50', fontSize: '22px' }}>Dia {diaSelecionado}</h3>
                   <p style={{ margin: 0, color: '#64748b', fontSize: '14px' }}>
-                    {verificarSePassou(diaSelecionado) ? 'Histórico de atendimentos passados' : 'Listagem de horários e compromissos do dia'}
+                    {isDiaModalPassado ? 'Histórico de atendimentos passados' : 'Listagem de horários e compromissos do dia'}
                   </p>
                 </div>
                 <button onClick={fecharModal} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#94a3b8' }}>×</button>
@@ -388,7 +391,9 @@ export default function Agenda() {
                 <div>
                   {agendamentosFuturosDoDia.length > 0 && (
                     <div style={{ marginBottom: '20px' }}>
-                      <h4 style={{ margin: '0 0 10px 0', color: '#3b82f6', fontSize: '14px', textTransform: 'uppercase' }}>🕒 Sessões Agendadas</h4>
+                      <h4 style={{ margin: '0 0 10px 0', color: isDiaModalPassado ? '#dc2626' : '#3b82f6', fontSize: '14px', textTransform: 'uppercase' }}>
+                        {isDiaModalPassado ? '⚠️ Sessões Pendentes (Não Concluídas)' : '🕒 Sessões Agendadas'}
+                      </h4>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                         {agendamentosFuturosDoDia.map(item => {
                           const mapaMesmoHorario = pacientesUnicosPorHorario[item.agendamento.hora];
@@ -401,15 +406,20 @@ export default function Agenda() {
                           const emConjunto = colegasNomes.length > 0;
 
                           return (
-                            <div key={item.agendamento.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px', backgroundColor: '#eff6ff', borderRadius: '15px', border: emConjunto ? '2px solid #93c5fd' : '1px solid #bfdbfe', gap: '10px' }}>
+                            <div key={item.agendamento.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px', backgroundColor: isDiaModalPassado ? '#fffbeb' : '#eff6ff', borderRadius: '15px', border: isDiaModalPassado ? '1px solid #fde68a' : (emConjunto ? '2px solid #93c5fd' : '1px solid #bfdbfe'), gap: '10px' }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                                 <span style={{ fontSize: '26px' }}>{item.paciente.avatar}</span>
                                 <div>
-                                  <strong style={{ display: 'block', color: '#1e3a8a', fontSize: '16px' }}>{item.paciente.nome}</strong>
+                                  <strong style={{ display: 'block', color: isDiaModalPassado ? '#92400e' : '#1e3a8a', fontSize: '16px' }}>{item.paciente.nome}</strong>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '4px' }}>
-                                    <span style={{ backgroundColor: '#dbeafe', color: '#1d4ed8', padding: '3px 8px', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold' }}>
+                                    <span style={{ backgroundColor: isDiaModalPassado ? '#fef3c7' : '#dbeafe', color: isDiaModalPassado ? '#b45309' : '#1d4ed8', padding: '3px 8px', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold' }}>
                                       🕒 {item.agendamento.hora}
                                     </span>
+                                    {isDiaModalPassado && (
+                                      <span style={{ backgroundColor: '#fee2e2', color: '#b91c1c', padding: '3px 8px', borderRadius: '8px', fontSize: '11px', fontWeight: 'bold' }}>
+                                        ⚠️ Pendente
+                                      </span>
+                                    )}
                                     {emConjunto && (
                                       <span style={{ backgroundColor: '#fef3c7', color: '#b45309', padding: '3px 8px', borderRadius: '8px', fontSize: '12px', fontWeight: 'bold' }}>
                                         👥 Com {colegasNomes.join(', ')}
@@ -423,10 +433,10 @@ export default function Agenda() {
                                 <button
                                   onClick={() => {
                                     fecharModal();
-                                    navigate(`/perfil/${item.paciente.id}?horaAgendada=${encodeURIComponent(item.agendamento.hora)}`);
+                                    navigate(`/perfil/${item.paciente.id}?dataAgendada=${encodeURIComponent(item.agendamento.data)}&horaAgendada=${encodeURIComponent(item.agendamento.hora)}`);
                                   }}
-                                  style={{ backgroundColor: '#fff', border: '1px solid #93c5fd', color: '#1d4ed8', padding: '6px 10px', borderRadius: '10px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', whiteSpace: 'nowrap' }}
-                                  title="Abrir Prontuário para iniciar esta sessão"
+                                  style={{ backgroundColor: '#fff', border: isDiaModalPassado ? '1px solid #f59e0b' : '1px solid #93c5fd', color: isDiaModalPassado ? '#b45309' : '#1d4ed8', padding: '6px 10px', borderRadius: '10px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                                  title="Abrir Prontuário para iniciar ou lançar esta sessão na data agendada"
                                 >
                                   📂 Prontuário
                                 </button>
@@ -490,7 +500,7 @@ export default function Agenda() {
                     <p style={{ textAlign: 'center', color: '#94a3b8', fontStyle: 'italic', padding: '20px 0' }}>Dia livre. Nenhum registro.</p>
                   )}
 
-                  {!verificarSePassou(diaSelecionado) && (
+                  {!isDiaModalPassado && (
                     <button 
                       onClick={() => setModoAgendamento(true)}
                       style={{ width: '100%', padding: '15px', backgroundColor: '#3b82f6', color: '#fff', border: 'none', borderRadius: '15px', fontWeight: 'bold', fontSize: '16px', cursor: 'pointer', marginTop: '10px', boxShadow: '0 4px 6px rgba(59, 130, 246, 0.2)' }}

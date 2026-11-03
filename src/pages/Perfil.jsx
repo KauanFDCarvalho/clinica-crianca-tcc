@@ -14,6 +14,7 @@ export default function Perfil() {
   const [searchParams, setSearchParams] = useSearchParams();
   const sessaoIdDaAgenda = searchParams.get('sessaoId');
   const horaAgendadaDaAgenda = searchParams.get('horaAgendada');
+  const dataAgendadaDaAgenda = searchParams.get('dataAgendada');
   
   const [colecaoAtual, setColecaoAtual] = useState(obterNomeColecao());
   const [paciente, setPaciente] = useState(null);
@@ -37,10 +38,18 @@ export default function Perfil() {
   const [resumoIA, setResumoIA] = useState('');
   const [gerandoResumoIA, setGerandoResumoIA] = useState(false);
 
-  // PAGINAÇÃO E NOTAS
+  // PAGINAÇÃO, NOTAS E EDIÇÃO DE SESSÕES PASSADAS
   const [paginaAtual, setPaginaAtual] = useState(1);
   const itensPorPagina = 5; 
   const [notasExpandidas, setNotasExpandidas] = useState({});
+  const [sessaoEditandoId, setSessaoEditandoId] = useState(null);
+  const [formEdicaoSessao, setFormEdicaoSessao] = useState({
+    dataISO: '',
+    horaInicio: '',
+    horaFim: '',
+    emocao: 'Feliz!',
+    observacoes: ''
+  });
 
   // ESTADOS DO FINANCEIRO E MÁSCARAS
   const [editandoFinanceiro, setEditandoFinanceiro] = useState(false);
@@ -92,6 +101,8 @@ export default function Perfil() {
     'Não informada': { bg: '#f5f5f5', text: '#666666', chart: '#cbd5e1', border: '#94a3b8', emoji: '❓', nivel: 3 }
   };
 
+  const opcoesEmocoesEdicao = ['Feliz!', 'Calmo', 'Cansado', 'Triste', 'Ansioso', 'Bravo', 'Não informada'];
+
   const niveisRegulacao = [
     { nivel: 6, nome: 'Feliz!', emoji: '😀' },
     { nivel: 5, nome: 'Calmo', emoji: '😌' },
@@ -114,20 +125,40 @@ export default function Perfil() {
 
   const extrairPartesData = (dataString) => {
     if (!dataString) return null;
-    const dataSo = dataString.split(' - ')[0];
+    const [dataSo, parteHorario] = dataString.split(' - ');
     const partes = dataSo.split('/');
     if (partes.length !== 3) return null;
+
+    let horaMinuto = 0;
+    let minuto = 0;
+    if (parteHorario) {
+      const matchHora = parteHorario.match(/(\d{2}):(\d{2})/);
+      if (matchHora) {
+        horaMinuto = Number(matchHora[1]);
+        minuto = Number(matchHora[2]);
+      }
+    }
+
     return {
       dia: Number(partes[0]),
       mes: Number(partes[1]),
       ano: Number(partes[2]),
       timestamp: new Date(partes[2], partes[1] - 1, partes[0]).getTime(),
+      timestampCompleto: new Date(partes[2], partes[1] - 1, partes[0], horaMinuto, minuto).getTime(),
       dataCurta: `${partes[0]}/${partes[1]}`
     };
   };
 
   const historicoOriginal = paciente.historico ? [...paciente.historico] : [];
-  const historicoReverso = [...historicoOriginal].reverse();
+  // Ordena da sessão mais recente para a mais antiga considerando a data e hora real da consulta
+  const historicoReverso = [...historicoOriginal].sort((a, b) => {
+    const infoA = extrairPartesData(a.data);
+    const infoB = extrairPartesData(b.data);
+    const timeA = infoA ? infoA.timestampCompleto : 0;
+    const timeB = infoB ? infoB.timestampCompleto : 0;
+    if (timeB !== timeA) return timeB - timeA;
+    return (Number(b.id) || 0) - (Number(a.id) || 0);
+  });
 
   const anosDisponiveis = Array.from(
     new Set([
@@ -268,6 +299,14 @@ export default function Perfil() {
     ? sessoesCronologicas.slice(-limitePadraoLinha)
     : sessoesCronologicas;
 
+  const montarUrlIniciarSessao = () => {
+    const params = new URLSearchParams();
+    if (dataAgendadaDaAgenda) params.set('data', dataAgendadaDaAgenda);
+    if (horaAgendadaDaAgenda) params.set('hora', horaAgendadaDaAgenda);
+    const queryString = params.toString();
+    return queryString ? `/sessao/${id}?${queryString}` : `/sessao/${id}`;
+  };
+
   const limparFiltros = () => {
     setTipoPeriodo('todos');
     setFiltroDataInicio('');
@@ -285,6 +324,100 @@ export default function Perfil() {
       ...prev,
       [sessaoId]: !prev[sessaoId]
     }));
+  };
+
+  // --- FUNÇÕES DE EDIÇÃO E EXCLUSÃO DE SESSÕES DO HISTÓRICO ---
+  const abrirEdicaoSessao = (sessao) => {
+    const [parteData, parteHorario] = (sessao.data || '').split(' - ');
+    let dataISO = '';
+    if (parteData && parteData.includes('/')) {
+      const [d, m, y] = parteData.split('/');
+      if (d && m && y) {
+        dataISO = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+      }
+    }
+
+    let horaInicio = '';
+    let horaFim = '';
+    if (parteHorario) {
+      const horasEncontradas = parteHorario.match(/\d{2}:\d{2}/g) || [];
+      if (parteHorario.startsWith('Até às')) {
+        horaFim = horasEncontradas[0] || '';
+      } else if (parteHorario.startsWith('A partir das')) {
+        horaInicio = horasEncontradas[0] || '';
+      } else {
+        horaInicio = horasEncontradas[0] || '';
+        horaFim = horasEncontradas[1] || '';
+      }
+    }
+
+    setFormEdicaoSessao({
+      dataISO,
+      horaInicio,
+      horaFim,
+      emocao: sessao.emocao === 'Feliz' ? 'Feliz!' : (sessao.emocao || 'Não informada'),
+      observacoes: sessao.observacoes || ''
+    });
+    setSessaoEditandoId(sessao.id);
+  };
+
+  const salvarEdicaoSessao = async (sessaoId) => {
+    if (!formEdicaoSessao.dataISO) {
+      alert("Por favor, informe a data da sessão.");
+      return;
+    }
+
+    const [ano, mes, dia] = formEdicaoSessao.dataISO.split('-');
+    let novaDataFormatada = `${dia}/${mes}/${ano}`;
+    if (formEdicaoSessao.horaInicio && formEdicaoSessao.horaFim) {
+      novaDataFormatada += ` - ${formEdicaoSessao.horaInicio} às ${formEdicaoSessao.horaFim}`;
+    } else if (formEdicaoSessao.horaInicio) {
+      novaDataFormatada += ` - A partir das ${formEdicaoSessao.horaInicio}`;
+    } else if (formEdicaoSessao.horaFim) {
+      novaDataFormatada += ` - Até às ${formEdicaoSessao.horaFim}`;
+    }
+
+    try {
+      const novaListaHistorico = (paciente.historico || []).map(item => {
+        if (String(item.id) !== String(sessaoId)) return item;
+        return {
+          ...item,
+          data: novaDataFormatada,
+          emocao: formEdicaoSessao.emocao,
+          observacoes: formEdicaoSessao.observacoes.trim()
+        };
+      });
+
+      const docRef = doc(db, obterNomeColecao(), id);
+      await updateDoc(docRef, { historico: novaListaHistorico });
+      setSessaoEditandoId(null);
+    } catch (error) {
+      console.error("Erro ao editar sessão:", error);
+      alert("Não foi possível salvar as alterações da sessão.");
+    }
+  };
+
+  const excluirSessaoHistorico = async (sessao) => {
+    const confirmar = window.confirm(`Deseja realmente excluir o registro da sessão de "${sessao.data}" do prontuário?`);
+    if (!confirmar) return;
+
+    try {
+      const novaListaHistorico = (paciente.historico || []).filter(
+        item => String(item.id) !== String(sessao.id)
+      );
+      const docRef = doc(db, obterNomeColecao(), id);
+      await updateDoc(docRef, { historico: novaListaHistorico });
+
+      if (pontoLinhaSelecionado && String(pontoLinhaSelecionado.id) === String(sessao.id)) {
+        setPontoLinhaSelecionado(null);
+      }
+      if (sessaoIdDaAgenda && String(sessaoIdDaAgenda) === String(sessao.id)) {
+        setSearchParams({});
+      }
+    } catch (error) {
+      console.error("Erro ao excluir sessão:", error);
+      alert("Não foi possível excluir a sessão.");
+    }
   };
 
   const gerarResumoClinicoIA = async () => {
@@ -416,15 +549,15 @@ export default function Perfil() {
           <div style={{ flex: 1 }}>
             <h1 style={{ margin: 0, color: '#2c3e50', fontSize: '26px' }}>{paciente.nome}</h1>
             <p style={{ margin: '5px 0 0 0', color: '#64748b' }}>Acesse o histórico analítico ou inicie um novo atendimento.</p>
-            {horaAgendadaDaAgenda && (
+            {(horaAgendadaDaAgenda || dataAgendadaDaAgenda) && (
               <span style={{ display: 'inline-block', marginTop: '8px', backgroundColor: '#dbeafe', color: '#1d4ed8', padding: '4px 12px', borderRadius: '12px', fontSize: '13px', fontWeight: 'bold' }}>
-                🕒 Horário selecionado na Agenda: {horaAgendadaDaAgenda}
+                🕒 Agendamento selecionado na Agenda: {dataAgendadaDaAgenda ? `${dataAgendadaDaAgenda} ` : ''}{horaAgendadaDaAgenda ? `às ${horaAgendadaDaAgenda}` : ''}
               </span>
             )}
           </div>
           
           <button 
-            onClick={() => navigate(horaAgendadaDaAgenda ? `/sessao/${id}?hora=${encodeURIComponent(horaAgendadaDaAgenda)}` : `/sessao/${id}`)}
+            onClick={() => navigate(montarUrlIniciarSessao())}
             style={{ padding: '15px 30px', backgroundColor: '#4ade80', color: '#166534', border: 'none', borderRadius: '15px', fontSize: '18px', fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 4px 6px rgba(0,0,0,0.05)', width: isMobile ? '100%' : 'auto', whiteSpace: 'nowrap' }}
           >
             ▶ Iniciar Sessão
@@ -982,53 +1115,149 @@ export default function Perfil() {
                     ? sessao.observacoes.substring(0, 150) + '...' 
                     : sessao.observacoes;
 
+                  const estaEditandoEstaSessao = String(sessaoEditandoId) === String(sessao.id);
+
                   return (
                     <div key={sessao.id} style={{ border: 'none', borderRadius: '20px', padding: isMobile ? '20px' : '25px', backgroundColor: 'rgba(255,255,255,0.8)', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
-                      <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '15px', gap: '10px' }}>
-                        <strong style={{ fontSize: '18px', color: '#2c3e50' }}>{sessao.data}</strong>
-                        
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                          {sessao.emConjuntoCom && (
-                            <span style={{ fontSize: '14px', backgroundColor: '#fef3c7', padding: '6px 14px', borderRadius: '20px', color: '#b45309', fontWeight: 'bold' }}>
-                              👥 Em conjunto com: {sessao.emConjuntoCom}
-                            </span>
-                          )}
-                          <span style={{ fontSize: '16px', backgroundColor: corDaEmocao.bg, padding: '6px 16px', borderRadius: '20px', color: corDaEmocao.text, fontWeight: 'bold' }}>
-                            {corDaEmocao.emoji} Emoção: {sessao.emocao}
-                          </span>
-                        </div>
-                      </div>
-                      
-                      <h4 style={{ margin: '0 0 10px 0', fontSize: '16px', color: '#4a5568' }}>Atividades da Rotina:</h4>
-                      {sessao.tarefas && sessao.tarefas.length > 0 ? (
-                        <ul style={{ margin: 0, paddingLeft: '20px', color: '#334155' }}>
-                          {sessao.tarefas.map(tarefa => (
-                            <li key={tarefa.id} style={{ textDecoration: tarefa.concluida ? 'line-through' : 'none', color: tarefa.concluida ? '#94a3b8' : '#334155', marginBottom: '6px', fontSize: '16px', wordBreak: 'break-word' }}>
-                              {tarefa.texto} {tarefa.concluida && ' ✓'}
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (<p style={{ margin: 0, color: '#94a3b8', fontSize: '15px' }}>Nenhuma atividade registrada neste dia.</p>)}
+                      {estaEditandoEstaSessao ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px' }}>
+                            <strong style={{ fontSize: '17px', color: '#1e3a8a' }}>✏️ Editando Registro da Sessão</strong>
+                            <button onClick={() => setSessaoEditandoId(null)} style={{ background: 'none', border: 'none', color: '#64748b', fontSize: '18px', cursor: 'pointer' }}>✕</button>
+                          </div>
 
-                      {sessao.observacoes && (
-                        <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#f8fafc', borderRadius: '12px', borderLeft: '4px solid #3b82f6' }}>
-                          <h4 style={{ margin: '0 0 8px 0', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 'bold' }}>
-                            📝 Anotações da Terapeuta
-                          </h4>
-                          <p style={{ margin: 0, fontSize: '16px', color: '#334155', lineHeight: '1.5', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                            {textoExibido}
-                          </p>
-                          {textoLongo && (
-                            <button 
-                              onClick={() => toggleExpandirNota(sessao.id)}
-                              style={{ background: 'none', border: 'none', color: '#3b82f6', fontWeight: 'bold', cursor: 'pointer', padding: '8px 0 0 0', fontSize: '14px', display: 'inline-block' }}
+                          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.2fr 1fr 1fr 1.2fr', gap: '12px' }}>
+                            <div>
+                              <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Data da Consulta:</label>
+                              <input
+                                type="date"
+                                value={formEdicaoSessao.dataISO}
+                                onChange={(e) => setFormEdicaoSessao({ ...formEdicaoSessao, dataISO: e.target.value })}
+                                style={{ width: '100%', padding: '10px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '14px', boxSizing: 'border-box' }}
+                              />
+                            </div>
+                            <div>
+                              <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Início:</label>
+                              <input
+                                type="time"
+                                value={formEdicaoSessao.horaInicio}
+                                onChange={(e) => setFormEdicaoSessao({ ...formEdicaoSessao, horaInicio: e.target.value })}
+                                style={{ width: '100%', padding: '10px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '14px', boxSizing: 'border-box' }}
+                              />
+                            </div>
+                            <div>
+                              <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Término:</label>
+                              <input
+                                type="time"
+                                value={formEdicaoSessao.horaFim}
+                                onChange={(e) => setFormEdicaoSessao({ ...formEdicaoSessao, horaFim: e.target.value })}
+                                style={{ width: '100%', padding: '10px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '14px', boxSizing: 'border-box' }}
+                              />
+                            </div>
+                            <div>
+                              <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Emoção:</label>
+                              <select
+                                value={formEdicaoSessao.emocao}
+                                onChange={(e) => setFormEdicaoSessao({ ...formEdicaoSessao, emocao: e.target.value })}
+                                style={{ width: '100%', padding: '10px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '14px', backgroundColor: '#fff', boxSizing: 'border-box' }}
+                              >
+                                {opcoesEmocoesEdicao.map(emoOp => (
+                                  <option key={emoOp} value={emoOp}>{coresEmocoes[emoOp]?.emoji} {emoOp}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+
+                          <div>
+                            <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Anotações da Terapeuta:</label>
+                            <textarea
+                              rows="4"
+                              value={formEdicaoSessao.observacoes}
+                              onChange={(e) => setFormEdicaoSessao({ ...formEdicaoSessao, observacoes: e.target.value })}
+                              placeholder="Observações da sessão..."
+                              style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', fontSize: '15px', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'sans-serif' }}
+                            />
+                          </div>
+
+                          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                            <button
+                              type="button"
+                              onClick={() => setSessaoEditandoId(null)}
+                              style={{ padding: '8px 16px', backgroundColor: '#e2e8f0', color: '#475569', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px' }}
                             >
-                              {isExpandida ? 'Ver menos' : 'Ler mais...'}
+                              Cancelar
                             </button>
-                          )}
+                            <button
+                              type="button"
+                              onClick={() => salvarEdicaoSessao(sessao.id)}
+                              style={{ padding: '8px 20px', backgroundColor: '#3b82f6', color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px' }}
+                            >
+                              💾 Salvar Alterações
+                            </button>
+                          </div>
                         </div>
-                      )}
+                      ) : (
+                        <>
+                          <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '15px', gap: '10px' }}>
+                            <strong style={{ fontSize: '18px', color: '#2c3e50' }}>{sessao.data}</strong>
+                            
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                              {sessao.emConjuntoCom && (
+                                <span style={{ fontSize: '14px', backgroundColor: '#fef3c7', padding: '6px 14px', borderRadius: '20px', color: '#b45309', fontWeight: 'bold' }}>
+                                  👥 Em conjunto com: {sessao.emConjuntoCom}
+                                </span>
+                              )}
+                              <span style={{ fontSize: '16px', backgroundColor: corDaEmocao.bg, padding: '6px 16px', borderRadius: '20px', color: corDaEmocao.text, fontWeight: 'bold' }}>
+                                {corDaEmocao.emoji} Emoção: {sessao.emocao}
+                              </span>
+                              <button
+                                onClick={() => abrirEdicaoSessao(sessao)}
+                                title="Editar data, horário, emoção ou anotações desta sessão"
+                                style={{ backgroundColor: '#f1f5f9', border: '1px solid #cbd5e1', color: '#475569', padding: '6px 10px', borderRadius: '12px', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer' }}
+                              >
+                                ✏️ Editar
+                              </button>
+                              <button
+                                onClick={() => excluirSessaoHistorico(sessao)}
+                                title="Excluir esta sessão do prontuário"
+                                style={{ backgroundColor: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', padding: '6px 10px', borderRadius: '12px', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer' }}
+                              >
+                                🗑️
+                              </button>
+                            </div>
+                          </div>
+                          
+                          <h4 style={{ margin: '0 0 10px 0', fontSize: '16px', color: '#4a5568' }}>Atividades da Rotina:</h4>
+                          {sessao.tarefas && sessao.tarefas.length > 0 ? (
+                            <ul style={{ margin: 0, paddingLeft: '20px', color: '#334155' }}>
+                              {sessao.tarefas.map(tarefa => (
+                                <li key={tarefa.id} style={{ textDecoration: tarefa.concluida ? 'line-through' : 'none', color: tarefa.concluida ? '#94a3b8' : '#334155', marginBottom: '6px', fontSize: '16px', wordBreak: 'break-word' }}>
+                                  {tarefa.texto} {tarefa.concluida && ' ✓'}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (<p style={{ margin: 0, color: '#94a3b8', fontSize: '15px' }}>Nenhuma atividade registrada neste dia.</p>)}
 
+                          {sessao.observacoes && (
+                            <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#f8fafc', borderRadius: '12px', borderLeft: '4px solid #3b82f6' }}>
+                              <h4 style={{ margin: '0 0 8px 0', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 'bold' }}>
+                                📝 Anotações da Terapeuta
+                              </h4>
+                              <p style={{ margin: 0, fontSize: '16px', color: '#334155', lineHeight: '1.5', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                                {textoExibido}
+                              </p>
+                              {textoLongo && (
+                                <button 
+                                  onClick={() => toggleExpandirNota(sessao.id)}
+                                  style={{ background: 'none', border: 'none', color: '#3b82f6', fontWeight: 'bold', cursor: 'pointer', padding: '8px 0 0 0', fontSize: '14px', display: 'inline-block' }}
+                                >
+                                  {isExpandida ? 'Ver menos' : 'Ler mais...'}
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </>
+                      )}
                     </div>
                   );
                 })}
