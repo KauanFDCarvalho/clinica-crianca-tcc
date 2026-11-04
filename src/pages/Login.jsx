@@ -47,7 +47,7 @@ export default function Login() {
         {/* Logótipo e Boas-vindas */}
         <div style={{ fontSize: '50px', marginBottom: '10px' }}>✨</div>
         <h1 style={{ margin: '0 0 10px 0', color: '#2c3e50', fontSize: '28px' }}>Clínica Criança</h1>
-        <p style={{ color: '#64748b', fontSize: '16px', marginBottom: '30px' }}>Bem-vinda de volta!</p>
+        <p style={{ color: '#64748b', fontSize: '16px', marginBottom: '30px' }}>Que bom ter você de volta!</p>
 
         {/* Mensagem de Erro (se ela errar a senha) */}
         {erro && (

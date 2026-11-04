@@ -440,7 +440,7 @@ export default function Perfil() {
         return `- Data: ${s.data} | Emoção: ${s.emocao}${infoConjunto} | Tarefas concluídas: (${tConcluidas || 'Nenhuma'}) | Não concluídas: (${tPendentes || 'Nenhuma'}) | Anotações: ${s.observacoes || 'Sem anotações'}`;
       }).join('\n');
 
-      const prompt = `Você é um assistente clínico auxiliando a psicóloga infantil Dra. Júlia. Analise os registros abaixo do paciente ${paciente.nome} referentes ao período "${obterTextoPeriodoAtivo()}" e escreva um resumo executivo claro e acolhedor em até 2 parágrafos curtos. Destaque a evolução ou oscilação emocional da criança, o engajamento nas rotinas diárias e os principais temas observados nas anotações, facilitando a leitura rápida sem precisar ler dia por dia. Nunca use asteriscos (**) ou formatação markdown.\n\nRegistros:\n${registrosTexto}`;
+      const prompt = `Você é um assistente clínico de psicologia infantil. Analise os registros abaixo do paciente ${paciente.nome} referentes ao período "${obterTextoPeriodoAtivo()}" e escreva um resumo executivo claro e acolhedor em até 2 parágrafos curtos. Destaque a evolução ou oscilação emocional da criança, o engajamento nas rotinas diárias e os principais temas observados nas anotações, facilitando a leitura rápida sem precisar ler dia por dia. Nunca use asteriscos (**) ou formatação markdown.\n\nRegistros:\n${registrosTexto}`;
 
       const gerarConteudo = (modelName) =>
         genAI.getGenerativeModel({ model: modelName }).generateContent(prompt);
