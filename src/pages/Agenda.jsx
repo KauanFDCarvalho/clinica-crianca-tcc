@@ -224,8 +224,47 @@ export default function Agenda() {
     }
   };
 
+  const registrarFaltaAgendamento = async (pacienteObj, agendamentoObj, colegasNomes = []) => {
+    const motivoDigitado = window.prompt(
+      `Registrar FALTA para ${pacienteObj.nome} em ${agendamentoObj.data} às ${agendamentoObj.hora}.\n\nDeseja anotar o motivo ou observação da falta? (Opcional — deixe em branco se não houver):`,
+      ""
+    );
+
+    // Se o usuário clicou em "Cancelar" na janela do prompt, interrompe
+    if (motivoDigitado === null) return;
+
+    const novoIdHistorico = (pacienteObj.historico || []).reduce(
+      (maior, item) => Math.max(maior, Number(item.id) || 0),
+      0
+    ) + 1;
+
+    const dataFormatada = agendamentoObj.hora
+      ? `${agendamentoObj.data} - A partir das ${agendamentoObj.hora}`
+      : agendamentoObj.data;
+
+    const registroFalta = {
+      id: novoIdHistorico,
+      data: dataFormatada,
+      emocao: 'Falta',
+      tarefas: [],
+      observacoes: motivoDigitado.trim() || 'Paciente não compareceu à sessão agendada.',
+      ...(colegasNomes.length > 0 ? { emConjuntoCom: colegasNomes.join(', ') } : {})
+    };
+
+    try {
+      const docRef = doc(db, obterNomeColecao(), pacienteObj.id);
+      await updateDoc(docRef, {
+        historico: arrayUnion(registroFalta),
+        agendamentos: arrayRemove(agendamentoObj)
+      });
+    } catch (error) {
+      console.error("Erro ao registrar falta:", error);
+      alert("Não foi possível registrar a falta.");
+    }
+  };
+
   const cancelarAgendamento = async (pacienteId, agendamentoObj) => {
-    const confirmar = window.confirm("Deseja realmente desmarcar esta sessão?");
+    const confirmar = window.confirm("Deseja realmente desmarcar e excluir este agendamento?");
     if (!confirmar) return;
 
     try {
@@ -317,11 +356,19 @@ export default function Agenda() {
                 const diaPassou = verificarSePassou(dataStringStr);
 
                 const pacientesAtendidos = [];
+                const pacientesFaltaram = [];
                 const pacientesAgendados = [];
 
                 pacientes.forEach(paciente => {
-                  if (paciente.historico && paciente.historico.some(s => s.data && s.data.startsWith(dataStringStr))) {
-                    pacientesAtendidos.push(paciente);
+                  if (paciente.historico) {
+                    const teveConcluida = paciente.historico.some(
+                      s => s.data && s.data.startsWith(dataStringStr) && s.emocao !== 'Falta'
+                    );
+                    const teveFalta = paciente.historico.some(
+                      s => s.data && s.data.startsWith(dataStringStr) && s.emocao === 'Falta'
+                    );
+                    if (teveConcluida) pacientesAtendidos.push(paciente);
+                    if (teveFalta) pacientesFaltaram.push(paciente);
                   }
                   if (paciente.agendamentos && paciente.agendamentos.some(a => a.data === dataStringStr)) {
                     pacientesAgendados.push(paciente);
@@ -354,10 +401,16 @@ export default function Agenda() {
                           <div style={{ position: 'absolute', bottom: '-2px', right: '-2px', backgroundColor: '#4ade80', width: isMobile ? '10px' : '14px', height: isMobile ? '10px' : '14px', borderRadius: '50%', border: '1px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: isMobile ? '6px' : '9px', color: '#166534', fontWeight: 'bold' }}>✓</div>
                         </div>
                       ))}
+                      {pacientesFaltaram.map(pac => (
+                        <div key={`f-${pac.id}`} title={`Falta registrada: ${pac.nome}`} style={{ position: 'relative' }}>
+                          <div style={{ width: isMobile ? '18px' : '30px', height: isMobile ? '18px' : '30px', borderRadius: '50%', backgroundColor: '#fef2f2', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: isMobile ? '10px' : '18px', border: '1px solid #fca5a5' }}>{pac.avatar}</div>
+                          <div style={{ position: 'absolute', bottom: '-2px', right: '-2px', backgroundColor: '#ef4444', width: isMobile ? '10px' : '14px', height: isMobile ? '10px' : '14px', borderRadius: '50%', border: '1px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: isMobile ? '6px' : '8px', color: '#fff', fontWeight: 'bold' }}>✕</div>
+                        </div>
+                      ))}
                       {pacientesAgendados.map(pac => (
                         <div key={`a-${pac.id}`} title={diaPassou ? `Pendente (Não concluído): ${pac.nome}` : `Agendado: ${pac.nome}`} style={{ position: 'relative' }}>
-                          <div style={{ width: isMobile ? '18px' : '30px', height: isMobile ? '18px' : '30px', borderRadius: '50%', backgroundColor: diaPassou ? '#fef2f2' : '#eff6ff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: isMobile ? '10px' : '18px', border: diaPassou ? '1px solid #ef4444' : '1px solid #3b82f6' }}>{pac.avatar}</div>
-                          <div style={{ position: 'absolute', bottom: '-2px', right: '-2px', backgroundColor: diaPassou ? '#ef4444' : '#3b82f6', width: isMobile ? '10px' : '14px', height: isMobile ? '10px' : '14px', borderRadius: '50%', border: '1px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: isMobile ? '7px' : '9px', color: '#fff', fontWeight: 'bold' }}>{diaPassou ? '!' : '🕒'}</div>
+                          <div style={{ width: isMobile ? '18px' : '30px', height: isMobile ? '18px' : '30px', borderRadius: '50%', backgroundColor: diaPassou ? '#fffbeb' : '#eff6ff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: isMobile ? '10px' : '18px', border: diaPassou ? '1px solid #f59e0b' : '1px solid #3b82f6' }}>{pac.avatar}</div>
+                          <div style={{ position: 'absolute', bottom: '-2px', right: '-2px', backgroundColor: diaPassou ? '#f59e0b' : '#3b82f6', width: isMobile ? '10px' : '14px', height: isMobile ? '10px' : '14px', borderRadius: '50%', border: '1px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: isMobile ? '7px' : '9px', color: '#fff', fontWeight: 'bold' }}>{diaPassou ? '!' : '🕒'}</div>
                         </div>
                       ))}
                     </div>
@@ -375,7 +428,7 @@ export default function Agenda() {
           >
             <div 
               onClick={(e) => e.stopPropagation()} 
-              style={{ backgroundColor: '#fff', padding: isMobile ? '20px' : '30px', borderRadius: '25px', width: '100%', maxWidth: '500px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)', maxHeight: '90vh', overflowY: 'auto' }}
+              style={{ backgroundColor: '#fff', padding: isMobile ? '20px' : '30px', borderRadius: '25px', width: '100%', maxWidth: '520px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)', maxHeight: '90vh', overflowY: 'auto' }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                 <div>
@@ -391,8 +444,8 @@ export default function Agenda() {
                 <div>
                   {agendamentosFuturosDoDia.length > 0 && (
                     <div style={{ marginBottom: '20px' }}>
-                      <h4 style={{ margin: '0 0 10px 0', color: isDiaModalPassado ? '#dc2626' : '#3b82f6', fontSize: '14px', textTransform: 'uppercase' }}>
-                        {isDiaModalPassado ? '⚠️ Sessões Pendentes (Não Concluídas)' : '🕒 Sessões Agendadas'}
+                      <h4 style={{ margin: '0 0 10px 0', color: isDiaModalPassado ? '#d97706' : '#3b82f6', fontSize: '14px', textTransform: 'uppercase' }}>
+                        {isDiaModalPassado ? '⚠️ Sessões Pendentes (Sem Baixa)' : '🕒 Sessões Agendadas'}
                       </h4>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                         {agendamentosFuturosDoDia.map(item => {
@@ -406,7 +459,7 @@ export default function Agenda() {
                           const emConjunto = colegasNomes.length > 0;
 
                           return (
-                            <div key={item.agendamento.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px', backgroundColor: isDiaModalPassado ? '#fffbeb' : '#eff6ff', borderRadius: '15px', border: isDiaModalPassado ? '1px solid #fde68a' : (emConjunto ? '2px solid #93c5fd' : '1px solid #bfdbfe'), gap: '10px' }}>
+                            <div key={item.agendamento.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', padding: '15px', backgroundColor: isDiaModalPassado ? '#fffbeb' : '#eff6ff', borderRadius: '15px', border: isDiaModalPassado ? '1px solid #fde68a' : (emConjunto ? '2px solid #93c5fd' : '1px solid #bfdbfe'), gap: '10px' }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                                 <span style={{ fontSize: '26px' }}>{item.paciente.avatar}</span>
                                 <div>
@@ -416,7 +469,7 @@ export default function Agenda() {
                                       🕒 {item.agendamento.hora}
                                     </span>
                                     {isDiaModalPassado && (
-                                      <span style={{ backgroundColor: '#fee2e2', color: '#b91c1c', padding: '3px 8px', borderRadius: '8px', fontSize: '11px', fontWeight: 'bold' }}>
+                                      <span style={{ backgroundColor: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', padding: '2px 8px', borderRadius: '8px', fontSize: '11px', fontWeight: 'bold' }}>
                                         ⚠️ Pendente
                                       </span>
                                     )}
@@ -429,7 +482,7 @@ export default function Agenda() {
                                 </div>
                               </div>
 
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                                 <button
                                   onClick={() => {
                                     fecharModal();
@@ -440,7 +493,14 @@ export default function Agenda() {
                                 >
                                   📂 Prontuário
                                 </button>
-                                <button onClick={() => cancelarAgendamento(item.paciente.id, item.agendamento)} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', color: '#ef4444', padding: '5px' }} title="Desmarcar Sessão">
+                                <button
+                                  onClick={() => registrarFaltaAgendamento(item.paciente, item.agendamento, colegasNomes)}
+                                  style={{ backgroundColor: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', padding: '6px 10px', borderRadius: '10px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                                  title="Marcar que o paciente faltou nesta sessão e salvar no histórico"
+                                >
+                                  🚫 Falta
+                                </button>
+                                <button onClick={() => cancelarAgendamento(item.paciente.id, item.agendamento)} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', color: '#ef4444', padding: '5px' }} title="Desmarcar e excluir agendamento">
                                   🗑️
                                 </button>
                               </div>
@@ -453,23 +513,31 @@ export default function Agenda() {
 
                   {atendimentosDoDia.length > 0 && (
                     <div style={{ marginBottom: '20px' }}>
-                      <h4 style={{ margin: '0 0 10px 0', color: '#166534', fontSize: '14px', textTransform: 'uppercase' }}>✓ Sessões Concluídas</h4>
+                      <h4 style={{ margin: '0 0 10px 0', color: '#166534', fontSize: '14px', textTransform: 'uppercase' }}>✓ Registros do Dia (Concluídas e Faltas)</h4>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                         {atendimentosDoDia.map(item => {
                           const textoConjunto = item.sessao.emConjuntoCom || '';
+                          const isFalta = item.sessao.emocao === 'Falta';
+
                           return (
-                            <div key={item.sessao.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '15px', backgroundColor: '#f0fdf4', borderRadius: '15px', border: '1px solid #bbf7d0', gap: '10px' }}>
+                            <div key={item.sessao.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '15px', backgroundColor: isFalta ? '#fef2f2' : '#f0fdf4', borderRadius: '15px', border: isFalta ? '1px solid #fecaca' : '1px solid #bbf7d0', gap: '10px' }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                                 <span style={{ fontSize: '26px' }}>{item.paciente.avatar}</span>
                                 <div>
-                                  <strong style={{ display: 'block', color: '#14532d', fontSize: '16px' }}>{item.paciente.nome}</strong>
+                                  <strong style={{ display: 'block', color: isFalta ? '#991b1b' : '#14532d', fontSize: '16px' }}>{item.paciente.nome}</strong>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '4px' }}>
-                                    <span style={{ backgroundColor: '#dcfce7', color: '#15803d', padding: '3px 8px', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold' }}>
+                                    <span style={{ backgroundColor: isFalta ? '#fee2e2' : '#dcfce7', color: isFalta ? '#b91c1c' : '#15803d', padding: '3px 8px', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold' }}>
                                       🕒 {item.horarioTexto}
                                     </span>
-                                    <span style={{ color: '#166534', fontSize: '13px', fontWeight: '500' }}>
-                                      • Emoção: {item.sessao.emocao}
-                                    </span>
+                                    {isFalta ? (
+                                      <span style={{ backgroundColor: '#fee2e2', color: '#b91c1c', padding: '3px 8px', borderRadius: '8px', fontSize: '12px', fontWeight: 'bold' }}>
+                                        🚫 Falta registrada
+                                      </span>
+                                    ) : (
+                                      <span style={{ color: '#166534', fontSize: '13px', fontWeight: '500' }}>
+                                        • Emoção: {item.sessao.emocao}
+                                      </span>
+                                    )}
                                     {textoConjunto && (
                                       <span style={{ backgroundColor: '#fef3c7', color: '#b45309', padding: '3px 8px', borderRadius: '8px', fontSize: '12px', fontWeight: 'bold' }}>
                                         👥 Com {textoConjunto}
@@ -484,10 +552,10 @@ export default function Agenda() {
                                   fecharModal();
                                   navigate(`/perfil/${item.paciente.id}?sessaoId=${item.sessao.id}`);
                                 }}
-                                style={{ backgroundColor: '#fff', border: '1px solid #86efac', color: '#15803d', padding: '6px 10px', borderRadius: '10px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', whiteSpace: 'nowrap' }}
-                                title="Ver especificamente esta consulta no Prontuário"
+                                style={{ backgroundColor: '#fff', border: isFalta ? '1px solid #fca5a5' : '1px solid #86efac', color: isFalta ? '#b91c1c' : '#15803d', padding: '6px 10px', borderRadius: '10px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                                title="Ver especificamente este registro no Prontuário"
                               >
-                                📂 Ver consulta
+                                📂 {isFalta ? 'Ver falta' : 'Ver consulta'}
                               </button>
                             </div>
                           );

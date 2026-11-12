@@ -98,10 +98,11 @@ export default function Perfil() {
     'Triste': { bg: '#e3f2fd', text: '#1565c0', chart: '#90CAF9', border: '#3B82F6', emoji: '😢', nivel: 3 },
     'Ansioso': { bg: '#fff3e0', text: '#ef6c00', chart: '#FFCC80', border: '#F97316', emoji: '😬', nivel: 2 },
     'Bravo': { bg: '#ffebee', text: '#c62828', chart: '#FF8A80', border: '#EF4444', emoji: '😡', nivel: 1 },
-    'Não informada': { bg: '#f5f5f5', text: '#666666', chart: '#cbd5e1', border: '#94a3b8', emoji: '❓', nivel: 3 }
+    'Não informada': { bg: '#f5f5f5', text: '#666666', chart: '#cbd5e1', border: '#94a3b8', emoji: '❓', nivel: 3 },
+    'Falta': { bg: '#fee2e2', text: '#b91c1c', chart: '#ef4444', border: '#ef4444', emoji: '🚫', nivel: 0 }
   };
 
-  const opcoesEmocoesEdicao = ['Feliz!', 'Calmo', 'Cansado', 'Triste', 'Ansioso', 'Bravo', 'Não informada'];
+  const opcoesEmocoesEdicao = ['Feliz!', 'Calmo', 'Cansado', 'Triste', 'Ansioso', 'Bravo', 'Não informada', 'Falta'];
 
   const niveisRegulacao = [
     { nivel: 6, nome: 'Feliz!', emoji: '😀' },
@@ -205,6 +206,10 @@ export default function Perfil() {
     return true;
   });
 
+  // Separa as sessões efetivamente realizadas das faltas registradas no período
+  const sessoesRealizadasNoPeriodo = sessoesDoPeriodo.filter(s => s.emocao !== 'Falta');
+  const faltasNoPeriodo = sessoesDoPeriodo.filter(s => s.emocao === 'Falta');
+
   const obterTextoPeriodoAtivo = () => {
     if (tipoPeriodo === 'todos') return 'Todo o histórico registrado';
     if (tipoPeriodo === 'mes' && mesSelecionado) {
@@ -219,12 +224,12 @@ export default function Perfil() {
     return 'Período selecionado';
   };
 
-  // Contagem de emoções dentro do período ativo
+  // Contagem de emoções dentro do período ativo (ignora "Não informada" e "Falta")
   const contagemEmocoes = {};
   let totalEmocoesValidas = 0;
-  sessoesDoPeriodo.forEach(sessao => {
+  sessoesRealizadasNoPeriodo.forEach(sessao => {
     let emo = sessao.emocao === 'Feliz' ? 'Feliz!' : sessao.emocao; 
-    if (emo && emo !== 'Não informada') {
+    if (emo && emo !== 'Não informada' && emo !== 'Falta') {
       contagemEmocoes[emo] = (contagemEmocoes[emo] || 0) + 1;
       totalEmocoesValidas++;
     }
@@ -240,12 +245,12 @@ export default function Perfil() {
     }
   });
 
-  // Estatísticas compiladas das rotinas diárias (agrupando maiúsculas/minúsculas)
+  // Estatísticas compiladas das rotinas diárias (apenas sobre sessões comparecidas)
   let totalTarefasPeriodo = 0;
   let tarefasConcluidasPeriodo = 0;
   const mapaFrequenciaTarefas = {};
 
-  sessoesDoPeriodo.forEach(sessao => {
+  sessoesRealizadasNoPeriodo.forEach(sessao => {
     if (sessao.tarefas && Array.isArray(sessao.tarefas)) {
       sessao.tarefas.forEach(t => {
         totalTarefasPeriodo++;
@@ -277,7 +282,7 @@ export default function Perfil() {
     ? todasAtividadesPeriodo 
     : todasAtividadesPeriodo.slice(0, 5);
 
-  // 2º PASSO: Filtra a listagem detalhada caso uma barra de emoção ou uma consulta da Agenda tenha sido clicada
+  // 2º PASSO: Filtra a listagem detalhada caso uma barra de emoção, o selo de Falta ou uma consulta da Agenda tenha sido clicada
   const sessoesExibidasNaLista = sessoesDoPeriodo.filter(s => {
     if (sessaoIdDaAgenda && String(s.id) !== String(sessaoIdDaAgenda)) return false;
     if (emocaoSelecionadaGrafico && (s.emocao === 'Feliz' ? 'Feliz!' : s.emocao) !== emocaoSelecionadaGrafico) return false;
@@ -289,9 +294,9 @@ export default function Perfil() {
   const sessoesDaPagina = sessoesExibidasNaLista.slice(indexPrimeiroItem, indexUltimoItem);
   const totalPaginas = Math.ceil(sessoesExibidasNaLista.length / itensPorPagina);
 
-  // Dados em ordem cronológica (antigo -> recente) para o Gráfico de Linha
-  const sessoesCronologicas = [...sessoesDoPeriodo]
-    .filter(s => s.emocao && s.emocao !== 'Não informada')
+  // Dados em ordem cronológica (antigo -> recente) para o Gráfico de Linha (ignora "Falta")
+  const sessoesCronologicas = [...sessoesRealizadasNoPeriodo]
+    .filter(s => s.emocao && s.emocao !== 'Não informada' && s.emocao !== 'Falta')
     .reverse();
 
   const limitePadraoLinha = 10;
@@ -398,7 +403,7 @@ export default function Perfil() {
   };
 
   const excluirSessaoHistorico = async (sessao) => {
-    const confirmar = window.confirm(`Deseja realmente excluir o registro da sessão de "${sessao.data}" do prontuário?`);
+    const confirmar = window.confirm(`Deseja realmente excluir o registro de "${sessao.data}" do prontuário?`);
     if (!confirmar) return;
 
     try {
@@ -416,7 +421,7 @@ export default function Perfil() {
       }
     } catch (error) {
       console.error("Erro ao excluir sessão:", error);
-      alert("Não foi possível excluir a sessão.");
+      alert("Não foi possível excluir o registro.");
     }
   };
 
@@ -434,13 +439,16 @@ export default function Perfil() {
       const genAI = new GoogleGenerativeAI(apiKey);
 
       const registrosTexto = [...sessoesDoPeriodo].reverse().map(s => {
+        const infoConjunto = s.emConjuntoCom ? ` | Atendimento em conjunto com: ${s.emConjuntoCom}` : '';
+        if (s.emocao === 'Falta') {
+          return `- Data: ${s.data} | REGISTRO DE FALTA (Paciente não compareceu)${infoConjunto} | Motivo/Observações: ${s.observacoes || 'Sem justificativa anotada'}`;
+        }
         const tConcluidas = s.tarefas ? s.tarefas.filter(t => t.concluida).map(t => t.texto).join(', ') : 'Nenhuma';
         const tPendentes = s.tarefas ? s.tarefas.filter(t => !t.concluida).map(t => t.texto).join(', ') : 'Nenhuma';
-        const infoConjunto = s.emConjuntoCom ? ` | Atendimento em conjunto com: ${s.emConjuntoCom}` : '';
         return `- Data: ${s.data} | Emoção: ${s.emocao}${infoConjunto} | Tarefas concluídas: (${tConcluidas || 'Nenhuma'}) | Não concluídas: (${tPendentes || 'Nenhuma'}) | Anotações: ${s.observacoes || 'Sem anotações'}`;
       }).join('\n');
 
-      const prompt = `Você é um assistente clínico de psicologia infantil. Analise os registros abaixo do paciente ${paciente.nome} referentes ao período "${obterTextoPeriodoAtivo()}" e escreva um resumo executivo claro e acolhedor em até 2 parágrafos curtos. Destaque a evolução ou oscilação emocional da criança, o engajamento nas rotinas diárias e os principais temas observados nas anotações, facilitando a leitura rápida sem precisar ler dia por dia. Nunca use asteriscos (**) ou formatação markdown.\n\nRegistros:\n${registrosTexto}`;
+      const prompt = `Você é um assistente clínico de psicologia infantil. Analise os registros abaixo do paciente ${paciente.nome} referentes ao período "${obterTextoPeriodoAtivo()}" e escreva um resumo executivo claro e acolhedor em até 2 parágrafos curtos. Destaque a assiduidade (presenças e eventuais faltas), a evolução ou oscilação emocional da criança, o engajamento nas rotinas diárias e os principais temas observados nas anotações, facilitando a leitura rápida sem precisar ler dia por dia. Nunca use asteriscos (**) ou formatação markdown.\n\nRegistros:\n${registrosTexto}`;
 
       const gerarConteudo = (modelName) =>
         genAI.getGenerativeModel({ model: modelName }).generateContent(prompt);
@@ -670,8 +678,30 @@ export default function Perfil() {
                   <span style={{ fontSize: '18px' }}>🔎</span>
                   <strong style={{ color: '#1e3a8a', fontSize: '15px' }}>{obterTextoPeriodoAtivo()}</strong>
                   <span style={{ backgroundColor: '#dbeafe', color: '#1d4ed8', padding: '3px 10px', borderRadius: '12px', fontSize: '13px', fontWeight: 'bold' }}>
-                    {sessoesDoPeriodo.length} {sessoesDoPeriodo.length === 1 ? 'sessão encontrada' : 'sessões encontradas'}
+                    {sessoesRealizadasNoPeriodo.length} {sessoesRealizadasNoPeriodo.length === 1 ? 'sessão realizada' : 'sessões realizadas'}
                   </span>
+                  {faltasNoPeriodo.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEmocaoSelecionadaGrafico(emocaoSelecionadaGrafico === 'Falta' ? null : 'Falta');
+                        setPaginaAtual(1);
+                      }}
+                      title="Clique para filtrar apenas os dias de falta na listagem abaixo"
+                      style={{
+                        backgroundColor: emocaoSelecionadaGrafico === 'Falta' ? '#dc2626' : '#fee2e2',
+                        color: emocaoSelecionadaGrafico === 'Falta' ? '#fff' : '#b91c1c',
+                        border: '1px solid #fca5a5',
+                        padding: '3px 10px',
+                        borderRadius: '12px',
+                        fontSize: '13px',
+                        fontWeight: 'bold',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      🚫 {faltasNoPeriodo.length} {faltasNoPeriodo.length === 1 ? 'falta' : 'faltas'}
+                    </button>
+                  )}
                 </div>
                 {tipoPeriodo !== 'todos' && (
                   <button onClick={limparFiltros} style={{ background: 'none', border: 'none', color: '#2563eb', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer', textDecoration: 'underline' }}>
@@ -822,7 +852,7 @@ export default function Perfil() {
                   })}
                 </div>
 
-                {emocaoSelecionadaGrafico && (
+                {emocaoSelecionadaGrafico && emocaoSelecionadaGrafico !== 'Falta' && (
                   <div style={{ marginTop: '20px', padding: '18px', backgroundColor: '#f8fafc', borderRadius: '16px', border: '1px solid #cbd5e1' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
                       <strong style={{ color: '#1e293b', fontSize: '16px' }}>
@@ -1079,22 +1109,22 @@ export default function Perfil() {
               <h3 style={{ color: '#2c3e50', fontSize: '22px', margin: 0 }}>
                 Detalhamento por Dia{' '}
                 <span style={{ fontSize: '16px', color: '#64748b', fontWeight: 'normal' }}>
-                  ({sessoesExibidasNaLista.length} {sessoesExibidasNaLista.length === 1 ? 'sessão' : 'sessões'})
+                  ({sessoesExibidasNaLista.length} {sessoesExibidasNaLista.length === 1 ? 'registro' : 'registros'})
                 </span>
               </h3>
 
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 {sessaoIdDaAgenda && (
                   <span style={{ backgroundColor: '#dcfce7', color: '#166534', padding: '6px 14px', borderRadius: '20px', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    📌 Consulta selecionada na Agenda
-                    <button onClick={() => setSearchParams({})} style={{ background: 'none', border: 'none', color: '#166534', fontWeight: 'bold', cursor: 'pointer', padding: 0 }} title="Mostrar todas as consultas">✕</button>
+                    📌 Registro selecionado na Agenda
+                    <button onClick={() => setSearchParams({})} style={{ background: 'none', border: 'none', color: '#166534', fontWeight: 'bold', cursor: 'pointer', padding: 0 }} title="Mostrar todos os registros">✕</button>
                   </span>
                 )}
 
                 {emocaoSelecionadaGrafico && (
-                  <span style={{ backgroundColor: '#dbeafe', color: '#1e40af', padding: '6px 14px', borderRadius: '20px', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ backgroundColor: emocaoSelecionadaGrafico === 'Falta' ? '#fee2e2' : '#dbeafe', color: emocaoSelecionadaGrafico === 'Falta' ? '#b91c1c' : '#1e40af', padding: '6px 14px', borderRadius: '20px', fontSize: '13px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
                     Filtrando por: {coresEmocoes[emocaoSelecionadaGrafico]?.emoji} {emocaoSelecionadaGrafico}
-                    <button onClick={() => setEmocaoSelecionadaGrafico(null)} style={{ background: 'none', border: 'none', color: '#1e40af', fontWeight: 'bold', cursor: 'pointer', padding: 0 }}>✕</button>
+                    <button onClick={() => setEmocaoSelecionadaGrafico(null)} style={{ background: 'none', border: 'none', color: emocaoSelecionadaGrafico === 'Falta' ? '#b91c1c' : '#1e40af', fontWeight: 'bold', cursor: 'pointer', padding: 0 }}>✕</button>
                   </span>
                 )}
               </div>
@@ -1102,11 +1132,12 @@ export default function Perfil() {
             
             {sessoesExibidasNaLista.length === 0 ? (
               <p style={{ color: '#64748b', fontStyle: 'italic', backgroundColor: 'rgba(255,255,255,0.7)', padding: '25px', borderRadius: '20px', textAlign: 'center' }}>
-                Nenhuma sessão encontrada para este filtro ou período.
+                Nenhum registro encontrado para este filtro ou período.
               </p>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
                 {sessoesDaPagina.map((sessao) => {
+                  const isFalta = sessao.emocao === 'Falta';
                   const corDaEmocao = coresEmocoes[sessao.emocao] || coresEmocoes['Não informada'];
                   
                   const isExpandida = notasExpandidas[sessao.id];
@@ -1118,11 +1149,11 @@ export default function Perfil() {
                   const estaEditandoEstaSessao = String(sessaoEditandoId) === String(sessao.id);
 
                   return (
-                    <div key={sessao.id} style={{ border: 'none', borderRadius: '20px', padding: isMobile ? '20px' : '25px', backgroundColor: 'rgba(255,255,255,0.8)', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
+                    <div key={sessao.id} style={{ border: isFalta ? '1px solid #fecaca' : 'none', borderRadius: '20px', padding: isMobile ? '20px' : '25px', backgroundColor: isFalta ? 'rgba(254, 242, 242, 0.9)' : 'rgba(255,255,255,0.8)', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
                       {estaEditandoEstaSessao ? (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px' }}>
-                            <strong style={{ fontSize: '17px', color: '#1e3a8a' }}>✏️ Editando Registro da Sessão</strong>
+                            <strong style={{ fontSize: '17px', color: '#1e3a8a' }}>✏️ Editando Registro do Prontuário</strong>
                             <button onClick={() => setSessaoEditandoId(null)} style={{ background: 'none', border: 'none', color: '#64748b', fontSize: '18px', cursor: 'pointer' }}>✕</button>
                           </div>
 
@@ -1155,7 +1186,7 @@ export default function Perfil() {
                               />
                             </div>
                             <div>
-                              <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Emoção:</label>
+                              <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Status / Emoção:</label>
                               <select
                                 value={formEdicaoSessao.emocao}
                                 onChange={(e) => setFormEdicaoSessao({ ...formEdicaoSessao, emocao: e.target.value })}
@@ -1169,12 +1200,14 @@ export default function Perfil() {
                           </div>
 
                           <div>
-                            <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Anotações da Terapeuta:</label>
+                            <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>
+                              {formEdicaoSessao.emocao === 'Falta' ? 'Motivo / Observações da Falta:' : 'Anotações da Terapeuta:'}
+                            </label>
                             <textarea
                               rows="4"
                               value={formEdicaoSessao.observacoes}
                               onChange={(e) => setFormEdicaoSessao({ ...formEdicaoSessao, observacoes: e.target.value })}
-                              placeholder="Observações da sessão..."
+                              placeholder="Observações..."
                               style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', fontSize: '15px', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'sans-serif' }}
                             />
                           </div>
@@ -1198,8 +1231,8 @@ export default function Perfil() {
                         </div>
                       ) : (
                         <>
-                          <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '15px', gap: '10px' }}>
-                            <strong style={{ fontSize: '18px', color: '#2c3e50' }}>{sessao.data}</strong>
+                          <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', borderBottom: isFalta ? '1px solid #fecaca' : '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '15px', gap: '10px' }}>
+                            <strong style={{ fontSize: '18px', color: isFalta ? '#991b1b' : '#2c3e50' }}>{sessao.data}</strong>
                             
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                               {sessao.emConjuntoCom && (
@@ -1208,18 +1241,18 @@ export default function Perfil() {
                                 </span>
                               )}
                               <span style={{ fontSize: '16px', backgroundColor: corDaEmocao.bg, padding: '6px 16px', borderRadius: '20px', color: corDaEmocao.text, fontWeight: 'bold' }}>
-                                {corDaEmocao.emoji} Emoção: {sessao.emocao}
+                                {corDaEmocao.emoji} {isFalta ? 'Falta Registrada' : `Emoção: ${sessao.emocao}`}
                               </span>
                               <button
                                 onClick={() => abrirEdicaoSessao(sessao)}
-                                title="Editar data, horário, emoção ou anotações desta sessão"
+                                title="Editar data, horário, status ou observações deste registro"
                                 style={{ backgroundColor: '#f1f5f9', border: '1px solid #cbd5e1', color: '#475569', padding: '6px 10px', borderRadius: '12px', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer' }}
                               >
                                 ✏️ Editar
                               </button>
                               <button
                                 onClick={() => excluirSessaoHistorico(sessao)}
-                                title="Excluir esta sessão do prontuário"
+                                title="Excluir este registro do prontuário"
                                 style={{ backgroundColor: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', padding: '6px 10px', borderRadius: '12px', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer' }}
                               >
                                 🗑️
@@ -1227,21 +1260,25 @@ export default function Perfil() {
                             </div>
                           </div>
                           
-                          <h4 style={{ margin: '0 0 10px 0', fontSize: '16px', color: '#4a5568' }}>Atividades da Rotina:</h4>
-                          {sessao.tarefas && sessao.tarefas.length > 0 ? (
-                            <ul style={{ margin: 0, paddingLeft: '20px', color: '#334155' }}>
-                              {sessao.tarefas.map(tarefa => (
-                                <li key={tarefa.id} style={{ textDecoration: tarefa.concluida ? 'line-through' : 'none', color: tarefa.concluida ? '#94a3b8' : '#334155', marginBottom: '6px', fontSize: '16px', wordBreak: 'break-word' }}>
-                                  {tarefa.texto} {tarefa.concluida && ' ✓'}
-                                </li>
-                              ))}
-                            </ul>
-                          ) : (<p style={{ margin: 0, color: '#94a3b8', fontSize: '15px' }}>Nenhuma atividade registrada neste dia.</p>)}
+                          {!isFalta && (
+                            <>
+                              <h4 style={{ margin: '0 0 10px 0', fontSize: '16px', color: '#4a5568' }}>Atividades da Rotina:</h4>
+                              {sessao.tarefas && sessao.tarefas.length > 0 ? (
+                                <ul style={{ margin: 0, paddingLeft: '20px', color: '#334155' }}>
+                                  {sessao.tarefas.map(tarefa => (
+                                    <li key={tarefa.id} style={{ textDecoration: tarefa.concluida ? 'line-through' : 'none', color: tarefa.concluida ? '#94a3b8' : '#334155', marginBottom: '6px', fontSize: '16px', wordBreak: 'break-word' }}>
+                                      {tarefa.texto} {tarefa.concluida && ' ✓'}
+                                    </li>
+                                  ))}
+                                </ul>
+                              ) : (<p style={{ margin: 0, color: '#94a3b8', fontSize: '15px' }}>Nenhuma atividade registrada neste dia.</p>)}
+                            </>
+                          )}
 
                           {sessao.observacoes && (
-                            <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#f8fafc', borderRadius: '12px', borderLeft: '4px solid #3b82f6' }}>
-                              <h4 style={{ margin: '0 0 8px 0', fontSize: '12px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 'bold' }}>
-                                📝 Anotações da Terapeuta
+                            <div style={{ marginTop: isFalta ? '5px' : '20px', padding: '15px', backgroundColor: isFalta ? '#fff' : '#f8fafc', borderRadius: '12px', borderLeft: isFalta ? '4px solid #ef4444' : '4px solid #3b82f6' }}>
+                              <h4 style={{ margin: '0 0 8px 0', fontSize: '12px', color: isFalta ? '#b91c1c' : '#64748b', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 'bold' }}>
+                                {isFalta ? '🚫 Motivo / Observações da Falta' : '📝 Anotações da Terapeuta'}
                               </h4>
                               <p style={{ margin: 0, fontSize: '16px', color: '#334155', lineHeight: '1.5', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                                 {textoExibido}
