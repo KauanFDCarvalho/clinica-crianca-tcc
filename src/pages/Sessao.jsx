@@ -168,16 +168,13 @@ export default function Sessao() {
         setObservacoesSessao(dados.observacoesTemp || '');
         setHoraFim(dados.horaFimTemp || '');
 
-        // Prioridade da Data: 1º Data vinda da Agenda na URL | 2º Data temporária salva na sessão | 3º Data de hoje
         const dataEscolhida = dataVindaDaUrl || dados.dataSessaoTemp || DATA_HOJE_PADRAO;
         setDataSessao(dataEscolhida);
 
-        // Ordena os agendamentos da data ativa por horário
         const agendamentosNaDataOrdenados = (dados.agendamentos || [])
           .filter(a => a.data === dataEscolhida && a.hora)
           .sort((a, b) => a.hora.localeCompare(b.hora));
 
-        // Prioridade do Horário: 1º Horário vindo da Agenda na URL | 2º Horário em andamento | 3º Primeiro agendamento pendente da data
         const horaEscolhida = horaVindaDaUrl || dados.horaInicioTemp || (agendamentosNaDataOrdenados[0]?.hora || '');
         setHoraInicio(horaEscolhida);
 
@@ -226,15 +223,12 @@ export default function Sessao() {
 
   const dataAtivaBR = dataSessao || DATA_HOJE_PADRAO;
 
-  // Agendamentos desta criança na data ativa (para exibir seletor rápido caso haja mais de 1 no mesmo dia)
   const agendamentosDaDataDaCrianca = agendamentosPaciente
     .filter(a => a.data === dataAtivaBR && a.hora)
     .sort((a, b) => a.hora.localeCompare(b.hora));
 
-  // O horário de referência do atendimento atual é SEMPRE o horaInicio ativo na tela
   const horarioConjuntoRef = horaInicio;
 
-  // Busca outras crianças agendadas ou que já concluíram sessão na MESMA DATA e HORÁRIO (dataAtivaBR + horarioConjuntoRef)
   const colegasEmConjunto = horarioConjuntoRef
     ? todosPacientes
         .filter(outro => outro.id !== id)
@@ -263,7 +257,6 @@ export default function Sessao() {
     await updateDoc(docRef, { observacoesTemp: observacoesSessao });
   };
 
-  // Só permite alternar para colegas cuja sessão daquele horário ainda NÃO foi encerrada
   const alternarParaColega = async (colega) => {
     if (colega.jaConcluido) return;
     if (isGravando && reconhecedorRef.current) {
@@ -380,24 +373,29 @@ export default function Sessao() {
 
       const genAI = new GoogleGenerativeAI(apiKey);
 
-      let prompt = `Você é um contador de histórias infantis terapêuticas. Crie uma história lúdica, curta (máximo 3 parágrafos) e acolhedora para uma criança chamada ${nomePaciente}. `;
+      // ANONIMIZAÇÃO LOCAL: O nome real da criança NÃO é enviado à API externa; usa-se o marcador [CRIANCA]
+      const tokenAnonimo = '[CRIANCA]';
+      let prompt = `Você é um contador de histórias infantis terapêuticas. Crie uma história lúdica, curta (máximo 3 parágrafos) e acolhedora cujo personagem principal se chama exatamente ${tokenAnonimo}. `;
       
       if (iaUsarEmocao && emocaoSelecionada) {
-        prompt += `O personagem principal está se sentindo ${emocaoSelecionada}. Ajude o personagem a acolher essa emoção de forma bonita. `;
+        prompt += `O personagem ${tokenAnonimo} está se sentindo ${emocaoSelecionada}. Ajude o personagem a acolher essa emoção de forma bonita. `;
       }
       
       if (iaUsarRotina && rotina.length > 0) {
         const tarefasConcluidas = rotina.filter(t => t.concluida).map(t => t.texto).join(", ");
         if (tarefasConcluidas) {
-          prompt += `Durante o dia, o personagem conseguiu fazer estas coisas incríveis: ${tarefasConcluidas}. Celebre essas conquistas. `;
+          prompt += `Durante o dia, ${tokenAnonimo} conseguiu fazer estas coisas incríveis: ${tarefasConcluidas}. Celebre essas conquistas. `;
         }
       }
 
       if (iaUsarAnotacoes && observacoesSessao.trim() !== '') {
-        prompt += `Incorpore de forma LÚDICA e INDIRETA (usando metáforas de contos de fadas ou animais) este contexto da terapia: "${observacoesSessao}". `;
+        // Remove qualquer ocorrência acidental do nome da criança também nas anotações antes do envio
+        const regexNome = new RegExp(nomePaciente.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+        const observacoesAnonimizadas = observacoesSessao.replace(regexNome, tokenAnonimo);
+        prompt += `Incorpore de forma LÚDICA e INDIRETA (usando metáforas de contos de fadas ou animais, sem expor dados clínicos) este contexto: "${observacoesAnonimizadas}". `;
       }
 
-      prompt += `Termine a história com uma mensagem de segurança, afeto e esperança, mostrando que o personagem é muito amado e forte. Nunca use asteriscos (**) ou formatações markdown. Entregue apenas o texto limpo.`;
+      prompt += `Termine a história com uma mensagem de segurança, afeto e esperança, mostrando que ${tokenAnonimo} é muito especial e forte. Nunca use asteriscos (**) ou formatações markdown. Entregue apenas o texto limpo.`;
 
       const gerarConteudo = (modelName) =>
         genAI.getGenerativeModel({ model: modelName }).generateContent(prompt);
@@ -425,7 +423,10 @@ export default function Sessao() {
         }
       }
 
-      setHistoriaGerada(result.response.text());
+      // Substitui o token [CRIANCA] pelo nome do paciente localmente no navegador da psicóloga
+      const textoRetornado = result.response.text();
+      const textoPersonalizadoLocal = textoRetornado.replace(/\[CRIANCA\]/gi, nomePaciente);
+      setHistoriaGerada(textoPersonalizadoLocal);
     } catch (error) {
       console.error("Erro ao gerar história:", error);
       if (error instanceof GoogleGenerativeAIFetchError && error.status === 503) {
@@ -442,7 +443,6 @@ export default function Sessao() {
     const confirmacao = window.confirm(`Deseja encerrar esta sessão (data: ${dataAtivaBR}) e salvar no histórico?`);
     if (!confirmacao) return;
 
-    // Se já existir uma sessão salva nesta mesma data e horário para esta criança, avisa antes de duplicar
     if (horaInicio) {
       const jaTemSessaoNesseHorario = historicoPaciente.some(
         h => h.data && (
@@ -476,7 +476,6 @@ export default function Sessao() {
       0
     ) + 1;
 
-    // Se a sessão aconteceu em conjunto, registra o nome e avatar dos colegas no histórico do Prontuário
     const nomesColegasConjunto = colegasEmConjunto
       .map(c => `${c.avatar} ${c.nome}`)
       .join(', ');
@@ -490,7 +489,6 @@ export default function Sessao() {
       ...(nomesColegasConjunto ? { emConjuntoCom: nomesColegasConjunto } : {})
     };
 
-    // Remove o agendamento correspondente a esta data e horário na Agenda Clínica
     const agendamentosDaData = agendamentosPaciente.filter(a => a.data === dataAtivaBR);
     const agendamentosRestantes = agendamentosPaciente.filter(a => {
       if (a.data !== dataAtivaBR) return true;
@@ -517,7 +515,6 @@ export default function Sessao() {
         horaFimTemp: ''
       });
 
-      // Só oferece ir para o colega se a sessão do colega naquele horário AINDA NÃO foi encerrada
       const colegaAindaAtivo = colegasEmConjunto.find(c => c.aindaAgendado);
 
       if (colegaAindaAtivo) {
@@ -566,7 +563,6 @@ export default function Sessao() {
               </div>
             </div>
 
-            {/* SÓ APARECE QUANDO A DATA E O HORÁRIO ATUAL SÃO EM CONJUNTO COM OUTRA CRIANÇA */}
             {colegasEmConjunto.length > 0 && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', justifyContent: 'center' }}>
                 <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#b45309', backgroundColor: '#fef3c7', padding: '4px 10px', borderRadius: '12px' }}>
@@ -742,7 +738,6 @@ export default function Sessao() {
           <div style={{ marginBottom: '25px', textAlign: 'center' }}>
             <p style={{ margin: '0 0 10px 0', color: '#4a5568', fontWeight: 'bold', fontSize: '18px' }}>Data e Horário do Atendimento</p>
 
-            {/* Se houver mais de 1 agendamento para a data ativa, mostra botões para escolher qual está atendendo */}
             {agendamentosDaDataDaCrianca.length > 1 && (
               <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: '13px', color: '#64748b', fontWeight: 'bold' }}>Agendados em {dataAtivaBR}:</span>
@@ -830,9 +825,13 @@ export default function Sessao() {
               <h3 style={{ margin: '0 0 10px 0', color: '#a855f7', fontSize: '24px', display: 'flex', alignItems: 'center', gap: '10px' }}>
                 ✨ História Mágica
               </h3>
-              <p style={{ margin: '0 0 20px 0', color: '#64748b', fontSize: '15px' }}>
-                Escolha o que a Inteligência Artificial deve incluir na historinha de encerramento do {nomePaciente}.
+              <p style={{ margin: '0 0 12px 0', color: '#64748b', fontSize: '15px' }}>
+                Escolha o que a Inteligência Artificial deve incluir na historinha de encerramento de {nomePaciente}.
               </p>
+
+              <div style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', padding: '10px 14px', borderRadius: '12px', marginBottom: '15px', fontSize: '12px', color: '#166534', lineHeight: '1.4' }}>
+                🔒 <strong>Sigilo Clínico Protegido:</strong> O nome da criança é ocultado automaticamente antes do envio à IA (substituído localmente apenas na sua tela) e as anotações clínicas permanecem desmarcadas por padrão.
+              </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', marginBottom: '25px', backgroundColor: '#f8fafc', padding: '20px', borderRadius: '15px' }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontSize: '16px', color: '#334155' }}>
@@ -845,7 +844,7 @@ export default function Sessao() {
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontSize: '16px', color: '#334155' }}>
                   <input type="checkbox" checked={iaUsarAnotacoes} onChange={(e) => setIaUsarAnotacoes(e.target.checked)} style={{ width: '20px', height: '20px', cursor: 'pointer' }} />
-                  Usar minhas anotações ditadas (use com cuidado)
+                  Usar minhas anotações ditadas (metáfora lúdica sem dados sensíveis)
                 </label>
               </div>
 

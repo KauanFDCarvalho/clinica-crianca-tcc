@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { collection, onSnapshot, doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { collection, onSnapshot, doc, updateDoc, arrayRemove } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import { db, auth, obterNomeColecao } from '../firebase';
 
@@ -17,7 +17,11 @@ export default function Agenda() {
   const [diaSelecionado, setDiaSelecionado] = useState('');
   const [modoAgendamento, setModoAgendamento] = useState(false); 
   
-  const [formAgendamento, setFormAgendamento] = useState({ pacientesIds: [''], hora: '' });
+  const [formAgendamento, setFormAgendamento] = useState({
+    pacientesIds: [''],
+    hora: '',
+    semanasRepeticao: 1
+  });
 
   useEffect(() => {
     const lidarComRedimensionamento = () => setIsMobile(window.innerWidth <= 768);
@@ -59,11 +63,41 @@ export default function Agenda() {
   const primeiroDiaDaSemana = new Date(ano, mes, 1).getDay(); 
 
   const diasDaSemana = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+  const nomesDiasSemanaCompletos = [
+    'domingo', 'segunda-feira', 'terça-feira', 'quarta-feira',
+    'quinta-feira', 'sexta-feira', 'sábado'
+  ];
 
   const formatarDataBR = (dia) => {
     const d = dia.toString().padStart(2, '0');
     const m = (mes + 1).toString().padStart(2, '0');
     return `${d}/${m}/${ano}`;
+  };
+
+  const obterNomeDiaSemanaDeDataBR = (dataStr) => {
+    if (!dataStr || !dataStr.includes('/')) return '';
+    const [d, m, y] = dataStr.split('/').map(Number);
+    const dataObj = new Date(y, m - 1, d);
+    return nomesDiasSemanaCompletos[dataObj.getDay()] || '';
+  };
+
+  const gerarDatasSemanais = (dataInicialBR, qtdSemanas) => {
+    const [d, m, y] = dataInicialBR.split('/').map(Number);
+    const datas = [];
+    for (let s = 0; s < qtdSemanas; s++) {
+      const dataFutura = new Date(y, m - 1, d + s * 7);
+      const diaFmt = String(dataFutura.getDate()).padStart(2, '0');
+      const mesFmt = String(dataFutura.getMonth() + 1).padStart(2, '0');
+      const anoFmt = dataFutura.getFullYear();
+      datas.push(`${diaFmt}/${mesFmt}/${anoFmt}`);
+    }
+    return datas;
+  };
+
+  const converterBRParaTimestamp = (dataStr) => {
+    if (!dataStr || !dataStr.includes('/')) return 0;
+    const [d, m, y] = dataStr.split('/').map(Number);
+    return new Date(y, m - 1, d).getTime();
   };
 
   const mudarMes = (direcao) => {
@@ -93,14 +127,14 @@ export default function Agenda() {
   const abrirModalDia = (dataString) => {
     setDiaSelecionado(dataString);
     setModoAgendamento(false); 
-    setFormAgendamento({ pacientesIds: [''], hora: '' });
+    setFormAgendamento({ pacientesIds: [''], hora: '', semanasRepeticao: 1 });
     setModalAberto(true);
   };
 
   const fecharModal = () => {
     setModalAberto(false);
     setModoAgendamento(false);
-    setFormAgendamento({ pacientesIds: [''], hora: '' });
+    setFormAgendamento({ pacientesIds: [''], hora: '', semanasRepeticao: 1 });
   };
 
   const atualizarPacienteNoForm = (index, valor) => {
@@ -177,11 +211,14 @@ export default function Agenda() {
       return;
     }
 
-    const criancaJaAgendada = agendamentosFuturosDoDia.find(
+    const qtdSemanas = Number(formAgendamento.semanasRepeticao) || 1;
+    const datasParaAgendar = gerarDatasSemanais(diaSelecionado, qtdSemanas);
+
+    const criancaJaAgendadaNoDia = agendamentosFuturosDoDia.find(
       item => idsUnicos.includes(item.paciente.id) && item.agendamento.hora === formAgendamento.hora
     );
-    if (criancaJaAgendada) {
-      alert(`${criancaJaAgendada.paciente.nome} já possui um agendamento marcado às ${formAgendamento.hora} neste dia.`);
+    if (criancaJaAgendadaNoDia) {
+      alert(`${criancaJaAgendadaNoDia.paciente.nome} já possui um agendamento marcado às ${formAgendamento.hora} neste dia.`);
       return;
     }
 
@@ -200,24 +237,37 @@ export default function Agenda() {
     try {
       const nomeCol = obterNomeColecao();
       await Promise.all(
-        idsUnicos.map((pacId, idx) => {
+        idsUnicos.map((pacId) => {
           const pacObj = pacientes.find(p => p.id === pacId);
-          const maiorIdAtual = (pacObj?.agendamentos || []).reduce(
+          const agendamentosAtuais = [...(pacObj?.agendamentos || [])];
+          let maiorIdAtual = agendamentosAtuais.reduce(
             (maior, item) => Math.max(maior, Number(item.id) || 0),
             0
           );
+
+          datasParaAgendar.forEach((dataAlvo) => {
+            const jaExisteNaData = agendamentosAtuais.some(
+              a => a.data === dataAlvo && a.hora === formAgendamento.hora
+            );
+            if (!jaExisteNaData) {
+              maiorIdAtual += 1;
+              agendamentosAtuais.push({
+                id: maiorIdAtual,
+                data: dataAlvo,
+                hora: formAgendamento.hora,
+                ...(qtdSemanas > 1 ? { recorrente: true } : {})
+              });
+            }
+          });
+
           const docRef = doc(db, nomeCol, pacId);
           return updateDoc(docRef, {
-            agendamentos: arrayUnion({
-              id: maiorIdAtual + idx + 1,
-              data: diaSelecionado,
-              hora: formAgendamento.hora
-            })
+            agendamentos: agendamentosAtuais
           });
         })
       );
       setModoAgendamento(false); 
-      setFormAgendamento({ pacientesIds: [''], hora: '' });
+      setFormAgendamento({ pacientesIds: [''], hora: '', semanasRepeticao: 1 });
     } catch (error) {
       console.error("Detalhes da falha:", error);
       alert("Houve um erro ao salvar o agendamento.");
@@ -230,7 +280,6 @@ export default function Agenda() {
       ""
     );
 
-    // Se o usuário clicou em "Cancelar" na janela do prompt, interrompe
     if (motivoDigitado === null) return;
 
     const novoIdHistorico = (pacienteObj.historico || []).reduce(
@@ -254,7 +303,7 @@ export default function Agenda() {
     try {
       const docRef = doc(db, obterNomeColecao(), pacienteObj.id);
       await updateDoc(docRef, {
-        historico: arrayUnion(registroFalta),
+        historico: [...(pacienteObj.historico || []), registroFalta],
         agendamentos: arrayRemove(agendamentoObj)
       });
     } catch (error) {
@@ -263,12 +312,47 @@ export default function Agenda() {
     }
   };
 
-  const cancelarAgendamento = async (pacienteId, agendamentoObj) => {
-    const confirmar = window.confirm("Deseja realmente desmarcar e excluir este agendamento?");
-    if (!confirmar) return;
+  const cancelarAgendamento = async (pacienteObj, agendamentoObj) => {
+    const tsAlvo = converterBRParaTimestamp(agendamentoObj.data);
+    const diaSemanaAlvo = obterNomeDiaSemanaDeDataBR(agendamentoObj.data);
+
+    // Verifica se existem outros agendamentos futuros da mesma criança no mesmo dia da semana e horário
+    const outrosDaMesmaSerie = (pacienteObj.agendamentos || []).filter(a => {
+      if (a.id === agendamentoObj.id) return false;
+      const tsItem = converterBRParaTimestamp(a.data);
+      const mesmoDiaSemana = obterNomeDiaSemanaDeDataBR(a.data) === diaSemanaAlvo;
+      return tsItem > tsAlvo && mesmoDiaSemana && a.hora === agendamentoObj.hora;
+    });
+
+    if (outrosDaMesmaSerie.length > 0) {
+      const apagarSerie = window.confirm(
+        `${pacienteObj.nome} possui mais ${outrosDaMesmaSerie.length} agendamento(s) futuro(s) toda ${diaSemanaAlvo} às ${agendamentoObj.hora}.\n\nClique em "OK" para desmarcar APENAS o dia ${agendamentoObj.data}.\nSe quiser cancelar também todas as próximas semanas desse horário, clique em "Cancelar" para ver a opção de série.`
+      );
+
+      if (!apagarSerie) {
+        const confirmarTodaSerie = window.confirm(
+          `Deseja desmarcar o dia ${agendamentoObj.data} E todas as ${outrosDaMesmaSerie.length} semanas seguintes de ${pacienteObj.nome} (${diaSemanaAlvo} às ${agendamentoObj.hora})?`
+        );
+        if (!confirmarTodaSerie) return;
+
+        try {
+          const idsParaRemover = new Set([agendamentoObj.id, ...outrosDaMesmaSerie.map(o => o.id)]);
+          const novaLista = (pacienteObj.agendamentos || []).filter(a => !idsParaRemover.has(a.id));
+          const docRef = doc(db, obterNomeColecao(), pacienteObj.id);
+          await updateDoc(docRef, { agendamentos: novaLista });
+        } catch (error) {
+          console.error("Erro ao desmarcar série:", error);
+          alert("Erro ao desmarcar agendamentos.");
+        }
+        return;
+      }
+    } else {
+      const confirmar = window.confirm("Deseja realmente desmarcar e excluir este agendamento?");
+      if (!confirmar) return;
+    }
 
     try {
-      const docRef = doc(db, obterNomeColecao(), pacienteId);
+      const docRef = doc(db, obterNomeColecao(), pacienteObj.id);
       await updateDoc(docRef, {
         agendamentos: arrayRemove(agendamentoObj)
       });
@@ -296,6 +380,7 @@ export default function Agenda() {
   });
 
   const isDiaModalPassado = verificarSePassou(diaSelecionado);
+  const nomeDiaSemanaModal = obterNomeDiaSemanaDeDataBR(diaSelecionado);
 
   return (
     <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #cde4ff 0%, #d8f5d4 100%)', padding: isMobile ? '10px' : '30px', fontFamily: 'sans-serif' }}>
@@ -432,7 +517,9 @@ export default function Agenda() {
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                 <div>
-                  <h3 style={{ margin: '0 0 5px 0', color: '#2c3e50', fontSize: '22px' }}>Dia {diaSelecionado}</h3>
+                  <h3 style={{ margin: '0 0 5px 0', color: '#2c3e50', fontSize: '22px' }}>
+                    Dia {diaSelecionado} {nomeDiaSemanaModal && <span style={{ fontSize: '15px', color: '#64748b', fontWeight: 'normal' }}>({nomeDiaSemanaModal})</span>}
+                  </h3>
                   <p style={{ margin: 0, color: '#64748b', fontSize: '14px' }}>
                     {isDiaModalPassado ? 'Histórico de atendimentos passados' : 'Listagem de horários e compromissos do dia'}
                   </p>
@@ -468,6 +555,11 @@ export default function Agenda() {
                                     <span style={{ backgroundColor: isDiaModalPassado ? '#fef3c7' : '#dbeafe', color: isDiaModalPassado ? '#b45309' : '#1d4ed8', padding: '3px 8px', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold' }}>
                                       🕒 {item.agendamento.hora}
                                     </span>
+                                    {item.agendamento.recorrente && (
+                                      <span style={{ backgroundColor: '#e0e7ff', color: '#4338ca', padding: '3px 8px', borderRadius: '8px', fontSize: '11px', fontWeight: 'bold' }}>
+                                        🔁 Semanal
+                                      </span>
+                                    )}
                                     {isDiaModalPassado && (
                                       <span style={{ backgroundColor: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', padding: '2px 8px', borderRadius: '8px', fontSize: '11px', fontWeight: 'bold' }}>
                                         ⚠️ Pendente
@@ -500,7 +592,7 @@ export default function Agenda() {
                                 >
                                   🚫 Falta
                                 </button>
-                                <button onClick={() => cancelarAgendamento(item.paciente.id, item.agendamento)} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', color: '#ef4444', padding: '5px' }} title="Desmarcar e excluir agendamento">
+                                <button onClick={() => cancelarAgendamento(item.paciente, item.agendamento)} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', color: '#ef4444', padding: '5px' }} title="Desmarcar agendamento">
                                   🗑️
                                 </button>
                               </div>
@@ -579,15 +671,39 @@ export default function Agenda() {
                 </div>
               ) : (
                 <form onSubmit={salvarAgendamento} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-                  <div>
-                    <label style={{ display: 'block', color: '#4a5568', fontWeight: 'bold', marginBottom: '5px', fontSize: '14px' }}>Horário da Sessão:</label>
-                    <input 
-                      type="time" 
-                      value={formAgendamento.hora} 
-                      onChange={(e) => setFormAgendamento({...formAgendamento, hora: e.target.value})} 
-                      style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', outline: 'none', fontSize: '15px', boxSizing: 'border-box' }} 
-                    />
+                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1.3fr', gap: '12px' }}>
+                    <div>
+                      <label style={{ display: 'block', color: '#4a5568', fontWeight: 'bold', marginBottom: '5px', fontSize: '14px' }}>Horário da Sessão:</label>
+                      <input 
+                        type="time" 
+                        value={formAgendamento.hora} 
+                        onChange={(e) => setFormAgendamento({...formAgendamento, hora: e.target.value})} 
+                        style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', outline: 'none', fontSize: '15px', boxSizing: 'border-box' }} 
+                      />
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', color: '#4a5568', fontWeight: 'bold', marginBottom: '5px', fontSize: '14px' }}>
+                        🔁 Repetição Semanal ({nomeDiaSemanaModal}):
+                      </label>
+                      <select
+                        value={formAgendamento.semanasRepeticao}
+                        onChange={(e) => setFormAgendamento({ ...formAgendamento, semanasRepeticao: Number(e.target.value) })}
+                        style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', outline: 'none', fontSize: '14px', backgroundColor: '#f8fafc', cursor: 'pointer', boxSizing: 'border-box', fontWeight: 'bold', color: '#1e3a8a' }}
+                      >
+                        <option value={1}>Apenas neste dia ({diaSelecionado})</option>
+                        <option value={4}>Toda {nomeDiaSemanaModal} por 4 semanas (1 mês)</option>
+                        <option value={8}>Toda {nomeDiaSemanaModal} por 8 semanas (2 meses)</option>
+                        <option value={12}>Toda {nomeDiaSemanaModal} por 12 semanas (3 meses)</option>
+                      </select>
+                    </div>
                   </div>
+
+                  {formAgendamento.semanasRepeticao > 1 && (
+                    <div style={{ backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', padding: '10px 14px', borderRadius: '12px', fontSize: '12px', color: '#1e40af' }}>
+                      ✨ <strong>Automação de Agenda:</strong> O sistema criará automaticamente os agendamentos toda <strong>{nomeDiaSemanaModal}</strong> às <strong>{formAgendamento.hora || '--:--'}</strong> pelas próximas <strong>{formAgendamento.semanasRepeticao} semanas</strong> ({gerarDatasSemanais(diaSelecionado, formAgendamento.semanasRepeticao).slice(0, 3).join(', ')}...).
+                    </div>
+                  )}
 
                   <div>
                     <label style={{ display: 'block', color: '#4a5568', fontWeight: 'bold', marginBottom: '8px', fontSize: '14px' }}>
@@ -636,7 +752,7 @@ export default function Agenda() {
                       type="button" 
                       onClick={() => {
                         setModoAgendamento(false);
-                        setFormAgendamento({ pacientesIds: [''], hora: '' });
+                        setFormAgendamento({ pacientesIds: [''], hora: '', semanasRepeticao: 1 });
                       }} 
                       style={{ flex: 1, padding: '12px', backgroundColor: '#e2e8f0', color: '#475569', border: 'none', borderRadius: '15px', fontWeight: 'bold', cursor: 'pointer' }}
                     >

@@ -7,6 +7,7 @@ import { GoogleGenerativeAI, GoogleGenerativeAIFetchError } from '@google/genera
 
 const ANO_ATUAL_PADRAO = String(new Date().getFullYear());
 const MES_ATUAL_PADRAO = `${ANO_ATUAL_PADRAO}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+const HOJE_ISO_PADRAO = new Date().toISOString().split('T')[0];
 
 export default function Perfil() {
   const { id } = useParams();
@@ -19,7 +20,7 @@ export default function Perfil() {
   const [colecaoAtual, setColecaoAtual] = useState(obterNomeColecao());
   const [paciente, setPaciente] = useState(null);
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
-  const [abaAtiva, setAbaAtiva] = useState('prontuario'); 
+  const [abaAtiva, setAbaAtiva] = useState('prontuario'); // 'prontuario' | 'anamnese' | 'financeiro'
 
   // ESTADOS DE FILTRO DE PERÍODO
   const [tipoPeriodo, setTipoPeriodo] = useState('todos'); // 'todos' | 'mes' | 'ano' | 'personalizado'
@@ -51,7 +52,18 @@ export default function Perfil() {
     observacoes: ''
   });
 
-  // ESTADOS DO FINANCEIRO E MÁSCARAS
+  // ESTADOS DA ABA ANAMNESE E OBJETIVOS TERAPÊUTICOS
+  const [editandoAnamnese, setEditandoAnamnese] = useState(false);
+  const [formAnamnese, setFormAnamnese] = useState({
+    queixaInicial: '',
+    desenvolvimento: '',
+    historicoEscolar: '',
+    dinamicaFamiliar: '',
+    interessesSensorial: ''
+  });
+  const [novoObjetivoTexto, setNovoObjetivoTexto] = useState('');
+
+  // ESTADOS DO FINANCEIRO, RESPONSÁVEIS E SESSÕES COM OS PAIS
   const [editandoFinanceiro, setEditandoFinanceiro] = useState(false);
   const [dadosForm, setDadosForm] = useState({
     responsavel1: '',
@@ -63,6 +75,14 @@ export default function Perfil() {
     valorSessao: '',
     vencimento: '',
     observacoes: ''
+  });
+
+  const [mostrarFormSessaoPais, setMostrarFormSessaoPais] = useState(false);
+  const [sessaoPaisEditandoId, setSessaoPaisEditandoId] = useState(null);
+  const [formSessaoPais, setFormSessaoPais] = useState({
+    dataISO: HOJE_ISO_PADRAO,
+    participantes: '',
+    resumo: ''
   });
 
   useEffect(() => {
@@ -206,7 +226,6 @@ export default function Perfil() {
     return true;
   });
 
-  // Separa as sessões efetivamente realizadas das faltas registradas no período
   const sessoesRealizadasNoPeriodo = sessoesDoPeriodo.filter(s => s.emocao !== 'Falta');
   const faltasNoPeriodo = sessoesDoPeriodo.filter(s => s.emocao === 'Falta');
 
@@ -224,7 +243,7 @@ export default function Perfil() {
     return 'Período selecionado';
   };
 
-  // Contagem de emoções dentro do período ativo (ignora "Não informada" e "Falta")
+  // Contagem de emoções dentro do período ativo
   const contagemEmocoes = {};
   let totalEmocoesValidas = 0;
   sessoesRealizadasNoPeriodo.forEach(sessao => {
@@ -245,7 +264,7 @@ export default function Perfil() {
     }
   });
 
-  // Estatísticas compiladas das rotinas diárias (apenas sobre sessões comparecidas)
+  // Estatísticas compiladas das rotinas diárias
   let totalTarefasPeriodo = 0;
   let tarefasConcluidasPeriodo = 0;
   const mapaFrequenciaTarefas = {};
@@ -282,7 +301,7 @@ export default function Perfil() {
     ? todasAtividadesPeriodo 
     : todasAtividadesPeriodo.slice(0, 5);
 
-  // 2º PASSO: Filtra a listagem detalhada caso uma barra de emoção, o selo de Falta ou uma consulta da Agenda tenha sido clicada
+  // 2º PASSO: Filtra a listagem detalhada
   const sessoesExibidasNaLista = sessoesDoPeriodo.filter(s => {
     if (sessaoIdDaAgenda && String(s.id) !== String(sessaoIdDaAgenda)) return false;
     if (emocaoSelecionadaGrafico && (s.emocao === 'Feliz' ? 'Feliz!' : s.emocao) !== emocaoSelecionadaGrafico) return false;
@@ -294,7 +313,7 @@ export default function Perfil() {
   const sessoesDaPagina = sessoesExibidasNaLista.slice(indexPrimeiroItem, indexUltimoItem);
   const totalPaginas = Math.ceil(sessoesExibidasNaLista.length / itensPorPagina);
 
-  // Dados em ordem cronológica (antigo -> recente) para o Gráfico de Linha (ignora "Falta")
+  // Dados em ordem cronológica para o Gráfico de Linha
   const sessoesCronologicas = [...sessoesRealizadasNoPeriodo]
     .filter(s => s.emocao && s.emocao !== 'Não informada' && s.emocao !== 'Falta')
     .reverse();
@@ -303,6 +322,33 @@ export default function Perfil() {
   const sessoesParaGraficoLinha = (!mostrarTodasSessoesLinha && sessoesCronologicas.length > limitePadraoLinha)
     ? sessoesCronologicas.slice(-limitePadraoLinha)
     : sessoesCronologicas;
+
+  // --- OBJETIVOS TERAPÊUTICOS (ANAMNESE) ---
+  const listaObjetivos = paciente.objetivosTerapeuticos ? [...paciente.objetivosTerapeuticos] : [];
+  const totalObjetivosConcluidos = listaObjetivos.filter(o => o.concluido).length;
+  const percentualObjetivos = listaObjetivos.length > 0
+    ? Math.round((totalObjetivosConcluidos / listaObjetivos.length) * 100)
+    : 0;
+
+  // --- SESSÕES COM OS PAIS / DEVOLUTIVAS ---
+  const sessoesPaisOrdenadas = [...(paciente.sessoesPais || [])].sort((a, b) => {
+    const infoA = extrairPartesData(a.data);
+    const infoB = extrairPartesData(b.data);
+    const timeA = infoA ? infoA.timestamp : 0;
+    const timeB = infoB ? infoB.timestamp : 0;
+    if (timeB !== timeA) return timeB - timeA;
+    return (Number(b.id) || 0) - (Number(a.id) || 0);
+  });
+
+  const ultimaSessaoPais = sessoesPaisOrdenadas[0] || null;
+  const tsUltimaSessaoPais = ultimaSessaoPais ? (extrairPartesData(ultimaSessaoPais.data)?.timestamp || 0) : 0;
+
+  const sessoesCriancaDesdeUltimaDevolutiva = historicoReverso.filter(s => {
+    if (s.emocao === 'Falta') return false;
+    if (!ultimaSessaoPais) return true;
+    const info = extrairPartesData(s.data);
+    return info && info.timestamp > tsUltimaSessaoPais;
+  }).length;
 
   const montarUrlIniciarSessao = () => {
     const params = new URLSearchParams();
@@ -425,6 +471,181 @@ export default function Perfil() {
     }
   };
 
+  // --- FUNÇÕES DE ANAMNESE E OBJETIVOS TERAPÊUTICOS ---
+  const iniciarEdicaoAnamnese = () => {
+    setFormAnamnese({
+      queixaInicial: paciente.anamnese?.queixaInicial || '',
+      desenvolvimento: paciente.anamnese?.desenvolvimento || '',
+      historicoEscolar: paciente.anamnese?.historicoEscolar || '',
+      dinamicaFamiliar: paciente.anamnese?.dinamicaFamiliar || '',
+      interessesSensorial: paciente.anamnese?.interessesSensorial || ''
+    });
+    setEditandoAnamnese(true);
+  };
+
+  const salvarAnamnese = async (e) => {
+    e.preventDefault();
+    try {
+      const docRef = doc(db, obterNomeColecao(), id);
+      await updateDoc(docRef, {
+        anamnese: {
+          ...formAnamnese,
+          ultimaAtualizacao: new Date().toLocaleDateString('pt-BR')
+        }
+      });
+      setEditandoAnamnese(false);
+    } catch (error) {
+      console.error("Erro ao salvar anamnese:", error);
+      alert("Não foi possível salvar os dados da anamnese.");
+    }
+  };
+
+  const adicionarObjetivoTerapeutico = async (e) => {
+    e.preventDefault();
+    const textoLimpo = novoObjetivoTexto.trim();
+    if (!textoLimpo) return;
+
+    const novoId = listaObjetivos.reduce((maior, item) => Math.max(maior, Number(item.id) || 0), 0) + 1;
+    const novoObj = {
+      id: novoId,
+      texto: textoLimpo,
+      concluido: false,
+      dataCriacao: new Date().toLocaleDateString('pt-BR')
+    };
+
+    try {
+      const docRef = doc(db, obterNomeColecao(), id);
+      await updateDoc(docRef, {
+        objetivosTerapeuticos: [...listaObjetivos, novoObj]
+      });
+      setNovoObjetivoTexto('');
+    } catch (error) {
+      console.error("Erro ao adicionar objetivo:", error);
+      alert("Erro ao adicionar objetivo terapêutico.");
+    }
+  };
+
+  const alternarStatusObjetivo = async (objId) => {
+    const novaLista = listaObjetivos.map(item => {
+      if (item.id !== objId) return item;
+      const novoStatus = !item.concluido;
+      return {
+        ...item,
+        concluido: novoStatus,
+        dataConclusao: novoStatus ? new Date().toLocaleDateString('pt-BR') : ''
+      };
+    });
+
+    try {
+      const docRef = doc(db, obterNomeColecao(), id);
+      await updateDoc(docRef, { objetivosTerapeuticos: novaLista });
+    } catch (error) {
+      console.error("Erro ao atualizar objetivo:", error);
+    }
+  };
+
+  const removerObjetivoTerapeutico = async (objId) => {
+    const confirmar = window.confirm("Deseja remover este objetivo terapêutico?");
+    if (!confirmar) return;
+
+    const novaLista = listaObjetivos.filter(item => item.id !== objId);
+    try {
+      const docRef = doc(db, obterNomeColecao(), id);
+      await updateDoc(docRef, { objetivosTerapeuticos: novaLista });
+    } catch (error) {
+      console.error("Erro ao remover objetivo:", error);
+    }
+  };
+
+  // --- FUNÇÕES DE SESSÕES COM OS PAIS / DEVOLUTIVAS ---
+  const abrirNovaSessaoPais = () => {
+    const respPadrao = [paciente.financeiro?.responsavel1, paciente.financeiro?.responsavel2]
+      .filter(Boolean)
+      .join(' e ');
+    setFormSessaoPais({
+      dataISO: HOJE_ISO_PADRAO,
+      participantes: respPadrao || 'Responsáveis',
+      resumo: ''
+    });
+    setSessaoPaisEditandoId(null);
+    setMostrarFormSessaoPais(true);
+  };
+
+  const abrirEdicaoSessaoPais = (registro) => {
+    let dataISO = HOJE_ISO_PADRAO;
+    if (registro.data && registro.data.includes('/')) {
+      const [d, m, y] = registro.data.split('/');
+      if (d && m && y) dataISO = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+    }
+    setFormSessaoPais({
+      dataISO,
+      participantes: registro.participantes || '',
+      resumo: registro.resumo || ''
+    });
+    setSessaoPaisEditandoId(registro.id);
+    setMostrarFormSessaoPais(true);
+  };
+
+  const salvarSessaoPais = async (e) => {
+    e.preventDefault();
+    if (!formSessaoPais.dataISO || !formSessaoPais.resumo.trim()) {
+      alert("Por favor, preencha a data e o resumo da conversa com os pais.");
+      return;
+    }
+
+    const [ano, mes, dia] = formSessaoPais.dataISO.split('-');
+    const dataBR = `${dia}/${mes}/${ano}`;
+    const listaAtual = [...(paciente.sessoesPais || [])];
+
+    let novaLista;
+    if (sessaoPaisEditandoId !== null) {
+      novaLista = listaAtual.map(item =>
+        String(item.id) === String(sessaoPaisEditandoId)
+          ? {
+              ...item,
+              data: dataBR,
+              participantes: formSessaoPais.participantes.trim() || 'Responsáveis',
+              resumo: formSessaoPais.resumo.trim()
+            }
+          : item
+      );
+    } else {
+      const novoId = listaAtual.reduce((maior, item) => Math.max(maior, Number(item.id) || 0), 0) + 1;
+      novaLista = [
+        ...listaAtual,
+        {
+          id: novoId,
+          data: dataBR,
+          participantes: formSessaoPais.participantes.trim() || 'Responsáveis',
+          resumo: formSessaoPais.resumo.trim()
+        }
+      ];
+    }
+
+    try {
+      const docRef = doc(db, obterNomeColecao(), id);
+      await updateDoc(docRef, { sessoesPais: novaLista });
+      setMostrarFormSessaoPais(false);
+      setSessaoPaisEditandoId(null);
+    } catch (error) {
+      console.error("Erro ao salvar sessão com os pais:", error);
+      alert("Não foi possível salvar o registro da sessão com os pais.");
+    }
+  };
+
+  const excluirSessaoPais = async (registroId) => {
+    const confirmar = window.confirm("Deseja excluir este registro de sessão com os pais?");
+    if (!confirmar) return;
+
+    const novaLista = (paciente.sessoesPais || []).filter(item => String(item.id) !== String(registroId));
+    try {
+      const docRef = doc(db, obterNomeColecao(), id);
+      await updateDoc(docRef, { sessoesPais: novaLista });
+    } catch (error) {
+      console.error("Erro ao excluir sessão com os pais:", error);
+    }
+  };
+
   const gerarResumoClinicoIA = async () => {
     if (sessoesDoPeriodo.length === 0) return;
     try {
@@ -438,17 +659,22 @@ export default function Perfil() {
 
       const genAI = new GoogleGenerativeAI(apiKey);
 
+      // ANONIMIZAÇÃO LOCAL: Oculta o nome real da criança antes do envio à API externa
+      const tokenAnonimo = '[CRIANCA]';
+      const regexNome = new RegExp((paciente.nome || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+
       const registrosTexto = [...sessoesDoPeriodo].reverse().map(s => {
-        const infoConjunto = s.emConjuntoCom ? ` | Atendimento em conjunto com: ${s.emConjuntoCom}` : '';
+        const obsAnonimizada = s.observacoes ? s.observacoes.replace(regexNome, tokenAnonimo) : 'Sem anotações';
         if (s.emocao === 'Falta') {
-          return `- Data: ${s.data} | REGISTRO DE FALTA (Paciente não compareceu)${infoConjunto} | Motivo/Observações: ${s.observacoes || 'Sem justificativa anotada'}`;
+          return `- Data: ${s.data} | REGISTRO DE FALTA (Não compareceu) | Motivo/Observações: ${obsAnonimizada}`;
         }
         const tConcluidas = s.tarefas ? s.tarefas.filter(t => t.concluida).map(t => t.texto).join(', ') : 'Nenhuma';
         const tPendentes = s.tarefas ? s.tarefas.filter(t => !t.concluida).map(t => t.texto).join(', ') : 'Nenhuma';
-        return `- Data: ${s.data} | Emoção: ${s.emocao}${infoConjunto} | Tarefas concluídas: (${tConcluidas || 'Nenhuma'}) | Não concluídas: (${tPendentes || 'Nenhuma'}) | Anotações: ${s.observacoes || 'Sem anotações'}`;
+        const infoConjunto = s.emConjuntoCom ? ` | Atendimento em conjunto` : '';
+        return `- Data: ${s.data} | Emoção: ${s.emocao}${infoConjunto} | Tarefas concluídas: (${tConcluidas || 'Nenhuma'}) | Não concluídas: (${tPendentes || 'Nenhuma'}) | Anotações: ${obsAnonimizada}`;
       }).join('\n');
 
-      const prompt = `Você é um assistente clínico de psicologia infantil. Analise os registros abaixo do paciente ${paciente.nome} referentes ao período "${obterTextoPeriodoAtivo()}" e escreva um resumo executivo claro e acolhedor em até 2 parágrafos curtos. Destaque a assiduidade (presenças e eventuais faltas), a evolução ou oscilação emocional da criança, o engajamento nas rotinas diárias e os principais temas observados nas anotações, facilitando a leitura rápida sem precisar ler dia por dia. Nunca use asteriscos (**) ou formatação markdown.\n\nRegistros:\n${registrosTexto}`;
+      const prompt = `Você é um assistente clínico de psicologia infantil. Analise os registros abaixo referentes ao paciente ${tokenAnonimo} no período "${obterTextoPeriodoAtivo()}" e escreva um resumo executivo claro e acolhedor em até 2 parágrafos curtos. Destaque a assiduidade (presenças e eventuais faltas), a evolução ou oscilação emocional de ${tokenAnonimo}, o engajamento nas rotinas diárias e os principais temas observados nas anotações, facilitando a leitura rápida antes de uma devolutiva com os pais. Nunca use asteriscos (**) ou formatação markdown.\n\nRegistros:\n${registrosTexto}`;
 
       const gerarConteudo = (modelName) =>
         genAI.getGenerativeModel({ model: modelName }).generateContent(prompt);
@@ -471,7 +697,8 @@ export default function Perfil() {
         }
       }
 
-      setResumoIA(result.response.text());
+      const textoLimpo = result.response.text().replace(/\[CRIANCA\]/gi, paciente.nome);
+      setResumoIA(textoLimpo);
     } catch (error) {
       console.error("Erro ao gerar resumo clínico:", error);
       setResumoIA("Não foi possível gerar a síntese automática agora. Você ainda pode consultar o compilado numérico acima.");
@@ -556,7 +783,7 @@ export default function Perfil() {
           </div>
           <div style={{ flex: 1 }}>
             <h1 style={{ margin: 0, color: '#2c3e50', fontSize: '26px' }}>{paciente.nome}</h1>
-            <p style={{ margin: '5px 0 0 0', color: '#64748b' }}>Acesse o histórico analítico ou inicie um novo atendimento.</p>
+            <p style={{ margin: '5px 0 0 0', color: '#64748b' }}>Acesse o histórico analítico, anamnese ou inicie um novo atendimento.</p>
             {(horaAgendadaDaAgenda || dataAgendadaDaAgenda) && (
               <span style={{ display: 'inline-block', marginTop: '8px', backgroundColor: '#dbeafe', color: '#1d4ed8', padding: '4px 12px', borderRadius: '12px', fontSize: '13px', fontWeight: 'bold' }}>
                 🕒 Agendamento selecionado na Agenda: {dataAgendadaDaAgenda ? `${dataAgendadaDaAgenda} ` : ''}{horaAgendadaDaAgenda ? `às ${horaAgendadaDaAgenda}` : ''}
@@ -572,22 +799,29 @@ export default function Perfil() {
           </button>
         </div>
 
-        <div style={{ display: 'flex', gap: '10px', marginBottom: '25px', backgroundColor: 'rgba(255,255,255,0.4)', padding: '8px', borderRadius: '20px' }}>
+        {/* BARRA DE NAVEGAÇÃO EM 3 ABAS */}
+        <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: '8px', marginBottom: '25px', backgroundColor: 'rgba(255,255,255,0.45)', padding: '8px', borderRadius: '20px' }}>
           <button 
             onClick={() => setAbaAtiva('prontuario')}
-            style={{ flex: 1, padding: '12px', borderRadius: '15px', border: 'none', fontWeight: 'bold', fontSize: '16px', cursor: 'pointer', transition: 'all 0.2s', backgroundColor: abaAtiva === 'prontuario' ? '#fff' : 'transparent', color: abaAtiva === 'prontuario' ? '#2c3e50' : '#64748b', boxShadow: abaAtiva === 'prontuario' ? '0 4px 6px rgba(0,0,0,0.05)' : 'none' }}
+            style={{ flex: 1, padding: '12px', borderRadius: '15px', border: 'none', fontWeight: 'bold', fontSize: '15px', cursor: 'pointer', transition: 'all 0.2s', backgroundColor: abaAtiva === 'prontuario' ? '#fff' : 'transparent', color: abaAtiva === 'prontuario' ? '#2c3e50' : '#64748b', boxShadow: abaAtiva === 'prontuario' ? '0 4px 6px rgba(0,0,0,0.05)' : 'none' }}
           >
             📊 Prontuário & Evolução
           </button>
           <button 
-            onClick={() => setAbaAtiva('financeiro')}
-            style={{ flex: 1, padding: '12px', borderRadius: '15px', border: 'none', fontWeight: 'bold', fontSize: '16px', cursor: 'pointer', transition: 'all 0.2s', backgroundColor: abaAtiva === 'financeiro' ? '#fff' : 'transparent', color: abaAtiva === 'financeiro' ? '#2c3e50' : '#64748b', boxShadow: abaAtiva === 'financeiro' ? '0 4px 6px rgba(0,0,0,0.05)' : 'none' }}
+            onClick={() => setAbaAtiva('anamnese')}
+            style={{ flex: 1, padding: '12px', borderRadius: '15px', border: 'none', fontWeight: 'bold', fontSize: '15px', cursor: 'pointer', transition: 'all 0.2s', backgroundColor: abaAtiva === 'anamnese' ? '#fff' : 'transparent', color: abaAtiva === 'anamnese' ? '#2c3e50' : '#64748b', boxShadow: abaAtiva === 'anamnese' ? '0 4px 6px rgba(0,0,0,0.05)' : 'none' }}
           >
-            👨‍👩‍👦 Pais & Acordos
+            📋 Anamnese & Objetivos
+          </button>
+          <button 
+            onClick={() => setAbaAtiva('financeiro')}
+            style={{ flex: 1, padding: '12px', borderRadius: '15px', border: 'none', fontWeight: 'bold', fontSize: '15px', cursor: 'pointer', transition: 'all 0.2s', backgroundColor: abaAtiva === 'financeiro' ? '#fff' : 'transparent', color: abaAtiva === 'financeiro' ? '#2c3e50' : '#64748b', boxShadow: abaAtiva === 'financeiro' ? '0 4px 6px rgba(0,0,0,0.05)' : 'none' }}
+          >
+            👨‍👩‍👦 Pais & Devolutivas
           </button>
         </div>
 
-        {/* ABA 1: PRONTUÁRIO */}
+        {/* ABA 1: PRONTUÁRIO E EVOLUÇÃO */}
         {abaAtiva === 'prontuario' && (
           <div>
             
@@ -722,6 +956,7 @@ export default function Perfil() {
                   <button 
                     onClick={gerarResumoClinicoIA} 
                     disabled={gerandoResumoIA}
+                    title="O nome da criança é anonimizado antes do envio à IA"
                     style={{ padding: '10px 18px', backgroundColor: '#a855f7', color: '#fff', border: 'none', borderRadius: '14px', fontWeight: 'bold', fontSize: '14px', cursor: gerandoResumoIA ? 'wait' : 'pointer', boxShadow: '0 4px 10px rgba(168, 85, 247, 0.25)', whiteSpace: 'nowrap' }}
                   >
                     {gerandoResumoIA ? '🪄 Sintetizando período...' : '✨ Gerar Síntese com IA'}
@@ -779,11 +1014,16 @@ export default function Perfil() {
 
                 {resumoIA && (
                   <div style={{ padding: '18px', backgroundColor: '#fdf4ff', borderRadius: '16px', border: '1px solid #f0abfc', marginTop: '10px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', flexWrap: 'wrap', gap: '6px' }}>
                       <strong style={{ color: '#701a75', fontSize: '14px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                         ✨ Síntese Clínica Gerada para o Período
                       </strong>
-                      <button onClick={() => setResumoIA('')} style={{ background: 'none', border: 'none', color: '#86198f', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>Fechar</button>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <span style={{ fontSize: '11px', backgroundColor: '#dcfce7', color: '#166534', padding: '2px 8px', borderRadius: '8px', fontWeight: 'bold' }}>
+                          🔒 Nome ocultado no envio à IA
+                        </span>
+                        <button onClick={() => setResumoIA('')} style={{ background: 'none', border: 'none', color: '#86198f', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>Fechar</button>
+                      </div>
                     </div>
                     <p style={{ margin: 0, color: '#581c87', fontSize: '15px', lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>{resumoIA}</p>
                   </div>
@@ -791,7 +1031,7 @@ export default function Perfil() {
               </div>
             )}
 
-            {/* GRÁFICO 1: BARRAS DE EMOÇÕES COM MAIS DETALHES E CLIQUE PARA FILTRAR */}
+            {/* GRÁFICO 1: BARRAS DE EMOÇÕES */}
             {Object.keys(contagemEmocoes).length > 0 && (
               <div style={{ backgroundColor: 'rgba(255,255,255,0.85)', padding: isMobile ? '25px 15px' : '35px 30px', borderRadius: '25px', marginBottom: '30px', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
                 <h3 style={{ textAlign: 'center', color: '#2c3e50', fontSize: isMobile ? '20px' : '22px', margin: '0 0 6px 0' }}>
@@ -890,7 +1130,7 @@ export default function Perfil() {
               </div>
             )}
 
-            {/* GRÁFICO 2: GRÁFICO DE LINHA COM COLUNA DE EMOÇÕES FIXA E RESPONSIVIDADE INTELIGENTE */}
+            {/* GRÁFICO 2: GRÁFICO DE LINHA COM COLUNA DE EMOÇÕES FIXA */}
             {sessoesCronologicas.length > 0 && (
               <div style={{ backgroundColor: 'rgba(255,255,255,0.85)', padding: isMobile ? '22px 12px' : '35px 30px', borderRadius: '25px', marginBottom: '30px', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
                 <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: 'center', gap: '10px', marginBottom: '18px' }}>
@@ -961,7 +1201,6 @@ export default function Perfil() {
                   return (
                     <div style={{ display: 'flex', alignItems: 'stretch', border: '1px solid #e2e8f0', borderRadius: '18px', backgroundColor: '#fff', overflow: 'hidden' }}>
                       
-                      {/* COLUNA ESQUERDA FIXA: Emoções sempre visíveis */}
                       <div style={{ width: isMobile ? '86px' : '105px', height: `${alturaGrafico}px`, position: 'relative', flexShrink: 0, backgroundColor: '#f8fafc', borderRight: '1px solid #e2e8f0', zIndex: 2 }}>
                         {niveisRegulacao.map(item => (
                           <div
@@ -987,7 +1226,6 @@ export default function Perfil() {
                         ))}
                       </div>
 
-                      {/* TRILHA DIREITA */}
                       <div style={{ flex: 1, overflowX: 'auto', position: 'relative' }}>
                         <div style={{ width: larguraMinimaTrilha, height: `${alturaGrafico}px`, position: 'relative' }}>
                           
@@ -1319,126 +1557,491 @@ export default function Perfil() {
           </div>
         )}
 
-        {/* ABA 2: FINANCEIRO E RESPONSÁVEIS */}
-        {abaAtiva === 'financeiro' && (
-          <div style={{ backgroundColor: 'rgba(255,255,255,0.85)', padding: isMobile ? '20px' : '40px', borderRadius: '25px', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px' }}>
-              <h3 style={{ margin: 0, color: '#2c3e50', fontSize: '22px' }}>Responsáveis e Acordo Financeiro</h3>
-              {!editandoFinanceiro && (
-                <button onClick={iniciarEdicaoFinanceiro} style={{ padding: '8px 15px', backgroundColor: '#e2e8f0', color: '#475569', border: 'none', borderRadius: '10px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>
-                  ✏️ Editar
+        {/* ABA 2: ANAMNESE E OBJETIVOS TERAPÊUTICOS */}
+        {abaAtiva === 'anamnese' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
+            
+            {/* BLOCO 1: OBJETIVOS TERAPÊUTICOS (PEI / METAS CLÍNICAS) */}
+            <div style={{ backgroundColor: 'rgba(255,255,255,0.85)', padding: isMobile ? '20px' : '35px', borderRadius: '25px', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
+              <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', gap: '10px', marginBottom: '20px' }}>
+                <div>
+                  <h3 style={{ margin: '0 0 4px 0', color: '#2c3e50', fontSize: '22px' }}>🎯 Plano de Objetivos Terapêuticos</h3>
+                  <p style={{ margin: 0, color: '#64748b', fontSize: '14px' }}>
+                    Metas clínicas de desenvolvimento (TEA/TDAH) e acompanhamento de aquisições.
+                  </p>
+                </div>
+                {listaObjetivos.length > 0 && (
+                  <span style={{ backgroundColor: '#dcfce7', color: '#166534', padding: '6px 14px', borderRadius: '15px', fontSize: '13px', fontWeight: 'bold' }}>
+                    ✓ {totalObjetivosConcluidos} de {listaObjetivos.length} alcançados ({percentualObjetivos}%)
+                  </span>
+                )}
+              </div>
+
+              {listaObjetivos.length > 0 && (
+                <div style={{ width: '100%', height: '10px', backgroundColor: '#e2e8f0', borderRadius: '6px', marginBottom: '20px', overflow: 'hidden' }}>
+                  <div style={{ width: `${percentualObjetivos}%`, height: '100%', backgroundColor: '#4ade80', transition: 'width 0.3s ease' }} />
+                </div>
+              )}
+
+              <form onSubmit={adicionarObjetivoTerapeutico} style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
+                <input
+                  type="text"
+                  placeholder="Ex: Identificar e verbalizar frustração sem desregulação motora..."
+                  value={novoObjetivoTexto}
+                  onChange={(e) => setNovoObjetivoTexto(e.target.value)}
+                  style={{ flex: 1, padding: '14px', borderRadius: '14px', border: '1px solid #cbd5e1', fontSize: '15px', outline: 'none' }}
+                />
+                <button
+                  type="submit"
+                  style={{ padding: '0 22px', backgroundColor: '#3b82f6', color: '#fff', border: 'none', borderRadius: '14px', fontWeight: 'bold', fontSize: '15px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                >
+                  + Adicionar Meta
                 </button>
+              </form>
+
+              {listaObjetivos.length === 0 ? (
+                <p style={{ margin: 0, color: '#94a3b8', fontStyle: 'italic', textAlign: 'center', padding: '15px 0' }}>
+                  Nenhum objetivo terapêutico cadastrado ainda para {paciente.nome}.
+                </p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {listaObjetivos.map(obj => (
+                    <div
+                      key={obj.id}
+                      onClick={() => alternarStatusObjetivo(obj.id)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '15px 18px',
+                        backgroundColor: obj.concluido ? '#f0fdf4' : '#f8fafc',
+                        borderRadius: '15px',
+                        borderLeft: obj.concluido ? '5px solid #4ade80' : '5px solid #3b82f6',
+                        cursor: 'pointer',
+                        gap: '12px'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flex: 1 }}>
+                        <div
+                          style={{
+                            width: '26px',
+                            height: '26px',
+                            borderRadius: '8px',
+                            border: obj.concluido ? 'none' : '2px solid #94a3b8',
+                            backgroundColor: obj.concluido ? '#4ade80' : '#fff',
+                            color: '#fff',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontWeight: 'bold',
+                            flexShrink: 0
+                          }}
+                        >
+                          {obj.concluido ? '✓' : ''}
+                        </div>
+                        <div>
+                          <span style={{ fontSize: '16px', fontWeight: 'bold', color: obj.concluido ? '#166534' : '#1e293b', textDecoration: obj.concluido ? 'line-through' : 'none', display: 'block' }}>
+                            {obj.texto}
+                          </span>
+                          <span style={{ fontSize: '12px', color: '#64748b' }}>
+                            Criado em {obj.dataCriacao} {obj.concluido && obj.dataConclusao ? `• Alcançado em ${obj.dataConclusao}` : '• Em andamento'}
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removerObjetivoTerapeutico(obj.id);
+                        }}
+                        style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '18px', cursor: 'pointer', padding: '4px' }}
+                        title="Remover objetivo"
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
 
-            {editandoFinanceiro ? (
-              <form onSubmit={salvarFinanceiro} style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
-                <div style={{ backgroundColor: '#f8fafc', padding: '20px', borderRadius: '15px', border: '1px solid #e2e8f0' }}>
-                  <h4 style={{ margin: '0 0 15px 0', color: '#4a5568', fontSize: '16px' }}>⭐ Contato Principal</h4>
-                  <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: '15px', marginBottom: '15px' }}>
-                    <div style={{ flex: 2 }}>
-                      <label style={{ display: 'block', color: '#64748b', fontSize: '12px', fontWeight: 'bold', marginBottom: '5px' }}>NOME COMPLETO *</label>
-                      <input type="text" placeholder="Ex: Roberto da Silva" value={dadosForm.responsavel1} onChange={(e) => setDadosForm({...dadosForm, responsavel1: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', outline: 'none', fontSize: '15px', boxSizing: 'border-box' }} required />
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <label style={{ display: 'block', color: '#64748b', fontSize: '12px', fontWeight: 'bold', marginBottom: '5px' }}>PARENTESCO *</label>
-                      <input type="text" placeholder="Ex: Pai, Avó..." value={dadosForm.parentesco1} onChange={(e) => setDadosForm({...dadosForm, parentesco1: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', outline: 'none', fontSize: '15px', boxSizing: 'border-box' }} required />
-                    </div>
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', color: '#64748b', fontSize: '12px', fontWeight: 'bold', marginBottom: '5px' }}>WHATSAPP / TELEFONE *</label>
-                    <input type="text" placeholder="(XX) XXXXX-XXXX" value={dadosForm.telefone1} onChange={(e) => handleTelefone(e, 'telefone1')} style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', outline: 'none', fontSize: '15px', boxSizing: 'border-box' }} required />
-                  </div>
-                </div>
-
-                <div style={{ backgroundColor: '#f8fafc', padding: '20px', borderRadius: '15px', border: '1px solid #e2e8f0' }}>
-                  <h4 style={{ margin: '0 0 15px 0', color: '#4a5568', fontSize: '16px' }}>Contato Secundário (Opcional)</h4>
-                  <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: '15px', marginBottom: '15px' }}>
-                    <div style={{ flex: 2 }}>
-                      <label style={{ display: 'block', color: '#64748b', fontSize: '12px', fontWeight: 'bold', marginBottom: '5px' }}>NOME</label>
-                      <input type="text" placeholder="Ex: Maria Souza" value={dadosForm.responsavel2} onChange={(e) => setDadosForm({...dadosForm, responsavel2: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', outline: 'none', fontSize: '15px', boxSizing: 'border-box' }} />
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <label style={{ display: 'block', color: '#64748b', fontSize: '12px', fontWeight: 'bold', marginBottom: '5px' }}>PARENTESCO</label>
-                      <input type="text" placeholder="Ex: Mãe" value={dadosForm.parentesco2} onChange={(e) => setDadosForm({...dadosForm, parentesco2: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', outline: 'none', fontSize: '15px', boxSizing: 'border-box' }} />
-                    </div>
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', color: '#64748b', fontSize: '12px', fontWeight: 'bold', marginBottom: '5px' }}>WHATSAPP / TELEFONE</label>
-                    <input type="text" placeholder="(XX) XXXXX-XXXX" value={dadosForm.telefone2} onChange={(e) => handleTelefone(e, 'telefone2')} style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', outline: 'none', fontSize: '15px', boxSizing: 'border-box' }} />
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: '20px' }}>
-                  <div style={{ flex: 1 }}>
-                    <label style={{ display: 'block', color: '#64748b', fontSize: '12px', fontWeight: 'bold', marginBottom: '5px' }}>VALOR POR SESSÃO</label>
-                    <input type="text" placeholder="R$ 0,00" value={dadosForm.valorSessao} onChange={handleMoeda} style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', outline: 'none', fontSize: '15px', boxSizing: 'border-box' }} />
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <label style={{ display: 'block', color: '#64748b', fontSize: '12px', fontWeight: 'bold', marginBottom: '5px' }}>DIA DE VENCIMENTO</label>
-                    <div style={{ display: 'flex', alignItems: 'center', backgroundColor: '#fff', border: '1px solid #cbd5e1', borderRadius: '12px', padding: '0 12px' }}>
-                      <span style={{ color: '#94a3b8', marginRight: '5px' }}>Todo dia</span>
-                      <input type="text" placeholder="10" value={dadosForm.vencimento} onChange={handleDia} style={{ width: '100%', padding: '12px 0', border: 'none', outline: 'none', fontSize: '15px', backgroundColor: 'transparent' }} />
-                    </div>
-                  </div>
-                </div>
-
+            {/* BLOCO 2: FICHA DE ANAMNESE E HISTÓRICO CLÍNICO DO PACIENTE */}
+            <div style={{ backgroundColor: 'rgba(255,255,255,0.85)', padding: isMobile ? '20px' : '35px', borderRadius: '25px', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px', flexWrap: 'wrap', gap: '10px' }}>
                 <div>
-                  <label style={{ display: 'block', color: '#64748b', fontSize: '12px', fontWeight: 'bold', marginBottom: '5px' }}>OBSERVAÇÕES (Dinâmica familiar, acordos, etc)</label>
-                  <textarea rows="4" placeholder="Adicione notas importantes..." value={dadosForm.observacoes} onChange={(e) => setDadosForm({...dadosForm, observacoes: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', outline: 'none', fontSize: '15px', resize: 'vertical', boxSizing: 'border-box' }} />
-                </div>
-
-                <div style={{ display: 'flex', gap: '15px', justifyContent: 'flex-end', marginTop: '10px' }}>
-                  <button type="button" onClick={() => setEditandoFinanceiro(false)} style={{ padding: '12px 20px', backgroundColor: 'transparent', color: '#64748b', border: 'none', fontWeight: 'bold', cursor: 'pointer', fontSize: '16px' }}>Cancelar</button>
-                  <button type="submit" style={{ padding: '12px 30px', backgroundColor: '#4ade80', color: '#166534', border: 'none', borderRadius: '15px', fontWeight: 'bold', cursor: 'pointer', fontSize: '16px', boxShadow: '0 4px 6px rgba(0,0,0,0.05)' }}>💾 Salvar Dados</button>
-                </div>
-              </form>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
-                <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: '30px' }}>
-                  <div style={{ flex: 1, backgroundColor: '#f8fafc', padding: '20px', borderRadius: '15px', borderLeft: '4px solid #4ade80' }}>
-                    <span style={{ display: 'block', fontSize: '12px', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 'bold', marginBottom: '10px' }}>Contato Principal</span>
-                    {paciente.financeiro?.responsavel1 ? (
-                      <>
-                        <strong style={{ display: 'block', fontSize: '18px', color: '#334155', marginBottom: '4px' }}>{paciente.financeiro.responsavel1} <span style={{ fontSize: '14px', color: '#64748b', fontWeight: 'normal' }}>({paciente.financeiro.parentesco1})</span></strong>
-                        <span style={{ fontSize: '16px', color: '#4a5568' }}>📞 {paciente.financeiro.telefone1}</span>
-                      </>
-                    ) : (
-                      <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>Não preenchido</span>
-                    )}
-                  </div>
-                  <div style={{ flex: 1, backgroundColor: '#f8fafc', padding: '20px', borderRadius: '15px', borderLeft: '4px solid #cbd5e1' }}>
-                    <span style={{ display: 'block', fontSize: '12px', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 'bold', marginBottom: '10px' }}>Contato Secundário</span>
-                    {paciente.financeiro?.responsavel2 ? (
-                      <>
-                        <strong style={{ display: 'block', fontSize: '18px', color: '#334155', marginBottom: '4px' }}>{paciente.financeiro.responsavel2} <span style={{ fontSize: '14px', color: '#64748b', fontWeight: 'normal' }}>({paciente.financeiro.parentesco2})</span></strong>
-                        <span style={{ fontSize: '16px', color: '#4a5568' }}>📞 {paciente.financeiro.telefone2}</span>
-                      </>
-                    ) : (
-                      <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>Não preenchido</span>
-                    )}
-                  </div>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '20px', borderTop: '1px solid #e2e8f0', paddingTop: '20px' }}>
-                  <div>
-                    <span style={{ display: 'block', fontSize: '12px', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 'bold', marginBottom: '4px' }}>Valor da Sessão</span>
-                    <strong style={{ fontSize: '20px', color: '#2e7d32' }}>{paciente.financeiro?.valorSessao || 'Não definido'}</strong>
-                  </div>
-                  <div>
-                    <span style={{ display: 'block', fontSize: '12px', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 'bold', marginBottom: '4px' }}>Vencimento</span>
-                    <strong style={{ fontSize: '20px', color: '#334155' }}>{paciente.financeiro?.vencimento ? `Todo dia ${paciente.financeiro.vencimento}` : 'Não definido'}</strong>
-                  </div>
-                </div>
-
-                <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '20px' }}>
-                  <span style={{ display: 'block', fontSize: '12px', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 'bold', marginBottom: '8px' }}>Observações Gerais</span>
-                  <p style={{ margin: 0, fontSize: '16px', color: paciente.financeiro?.observacoes ? '#4a5568' : '#94a3b8', lineHeight: '1.5', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                    {paciente.financeiro?.observacoes || 'Nenhuma observação registrada.'}
+                  <h3 style={{ margin: '0 0 4px 0', color: '#2c3e50', fontSize: '22px' }}>📋 Ficha de Anamnese e Histórico do Paciente</h3>
+                  <p style={{ margin: 0, color: '#64748b', fontSize: '14px' }}>
+                    Registro estruturado da história clínica, desenvolvimento, escola e perfil sensorial de {paciente.nome}.
                   </p>
                 </div>
+                {!editandoAnamnese && (
+                  <button
+                    onClick={iniciarEdicaoAnamnese}
+                    style={{ padding: '10px 18px', backgroundColor: '#e2e8f0', color: '#334155', border: 'none', borderRadius: '12px', fontWeight: 'bold', fontSize: '14px', cursor: 'pointer' }}
+                  >
+                    ✏️ Editar Anamnese
+                  </button>
+                )}
               </div>
-            )}
+
+              {editandoAnamnese ? (
+                <form onSubmit={salvarAnamnese} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                  <div>
+                    <label style={{ display: 'block', color: '#475569', fontSize: '13px', fontWeight: 'bold', marginBottom: '6px', textTransform: 'uppercase' }}>
+                      1. Queixa Inicial, Demanda e Encaminhamento
+                    </label>
+                    <textarea
+                      rows="3"
+                      placeholder="Motivo da busca pela psicoterapia, quem encaminhou, hipóteses diagnósticas ou laudos (TEA, TDAH)..."
+                      value={formAnamnese.queixaInicial}
+                      onChange={(e) => setFormAnamnese({ ...formAnamnese, queixaInicial: e.target.value })}
+                      style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', fontSize: '15px', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'sans-serif' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', color: '#475569', fontSize: '13px', fontWeight: 'bold', marginBottom: '6px', textTransform: 'uppercase' }}>
+                      2. Gestação, Parto e Desenvolvimento Neuropsicomotor (Fala, Marcha, Sono, Alimentação)
+                    </label>
+                    <textarea
+                      rows="3"
+                      placeholder="Marcos do desenvolvimento, primeiras palavras, seletividade alimentar, qualidade do sono..."
+                      value={formAnamnese.desenvolvimento}
+                      onChange={(e) => setFormAnamnese({ ...formAnamnese, desenvolvimento: e.target.value })}
+                      style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', fontSize: '15px', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'sans-serif' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', color: '#475569', fontSize: '13px', fontWeight: 'bold', marginBottom: '6px', textTransform: 'uppercase' }}>
+                      3. Histórico Escolar, Adaptação e Socialização com Pares
+                    </label>
+                    <textarea
+                      rows="3"
+                      placeholder="Escola atual, série, presença de mediador/acompanhante escolar, interação com outras crianças..."
+                      value={formAnamnese.historicoEscolar}
+                      onChange={(e) => setFormAnamnese({ ...formAnamnese, historicoEscolar: e.target.value })}
+                      style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', fontSize: '15px', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'sans-serif' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', color: '#475569', fontSize: '13px', fontWeight: 'bold', marginBottom: '6px', textTransform: 'uppercase' }}>
+                      4. Antecedentes, Dinâmica Familiar e Rotina em Casa
+                    </label>
+                    <textarea
+                      rows="3"
+                      placeholder="Com quem a criança reside, relação com pais/irmãos, rotina doméstica e acompanhamentos multidisciplinares (fono, TO, neuropediatra)..."
+                      value={formAnamnese.dinamicaFamiliar}
+                      onChange={(e) => setFormAnamnese({ ...formAnamnese, dinamicaFamiliar: e.target.value })}
+                      style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', fontSize: '15px', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'sans-serif' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', color: '#475569', fontSize: '13px', fontWeight: 'bold', marginBottom: '6px', textTransform: 'uppercase' }}>
+                      5. Hiperfocos, Interesses da Criança e Perfil Sensorial (Gatilhos e Reguladores)
+                    </label>
+                    <textarea
+                      rows="3"
+                      placeholder="Personagens/brincadeiras favoritas, sensibilidade a barulhos ou texturas, o que ajuda a acalmar em momentos de crise..."
+                      value={formAnamnese.interessesSensorial}
+                      onChange={(e) => setFormAnamnese({ ...formAnamnese, interessesSensorial: e.target.value })}
+                      style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', fontSize: '15px', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'sans-serif' }}
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '8px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setEditandoAnamnese(false)}
+                      style={{ padding: '12px 20px', backgroundColor: 'transparent', color: '#64748b', border: 'none', fontWeight: 'bold', cursor: 'pointer', fontSize: '15px' }}
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      style={{ padding: '12px 28px', backgroundColor: '#4ade80', color: '#166534', border: 'none', borderRadius: '14px', fontWeight: 'bold', cursor: 'pointer', fontSize: '15px' }}
+                    >
+                      💾 Salvar Anamnese
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+                  {[
+                    { titulo: '1. Queixa Inicial, Demanda e Encaminhamento', valor: paciente.anamnese?.queixaInicial, cor: '#3b82f6' },
+                    { titulo: '2. Gestação e Desenvolvimento Neuropsicomotor', valor: paciente.anamnese?.desenvolvimento, cor: '#10b981' },
+                    { titulo: '3. Histórico Escolar e Socialização', valor: paciente.anamnese?.historicoEscolar, cor: '#f59e0b' },
+                    { titulo: '4. Dinâmica Familiar e Acompanhamento Multidisciplinar', valor: paciente.anamnese?.dinamicaFamiliar, cor: '#8b5cf6' },
+                    { titulo: '5. Hiperfocos, Interesses e Perfil Sensorial (Gatilhos/Reguladores)', valor: paciente.anamnese?.interessesSensorial, cor: '#ec4899' }
+                  ].map((secao) => (
+                    <div key={secao.titulo} style={{ backgroundColor: '#f8fafc', padding: '18px', borderRadius: '15px', borderLeft: `4px solid ${secao.cor}` }}>
+                      <span style={{ display: 'block', fontSize: '12px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '6px' }}>
+                        {secao.titulo}
+                      </span>
+                      <p style={{ margin: 0, fontSize: '15px', color: secao.valor ? '#334155' : '#94a3b8', fontStyle: secao.valor ? 'normal' : 'italic', lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>
+                        {secao.valor || 'Não preenchido. Clique em "Editar Anamnese" para registrar.'}
+                      </p>
+                    </div>
+                  ))}
+                  {paciente.anamnese?.ultimaAtualizacao && (
+                    <span style={{ fontSize: '12px', color: '#94a3b8', textAlign: 'right' }}>
+                      Última atualização da anamnese: {paciente.anamnese.ultimaAtualizacao}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ABA 3: PAIS, ACORDOS E SESSÕES DE DEVOLUTIVA */}
+        {abaAtiva === 'financeiro' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
+            
+            {/* BLOCO 1: SESSÕES COM OS PAIS / DEVOLUTIVAS E ORIENTAÇÃO PARENTAL */}
+            <div style={{ backgroundColor: 'rgba(255,255,255,0.85)', padding: isMobile ? '20px' : '35px', borderRadius: '25px', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
+              <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', gap: '12px', marginBottom: '18px' }}>
+                <div>
+                  <h3 style={{ margin: '0 0 4px 0', color: '#2c3e50', fontSize: '22px' }}>🗣️ Sessões com os Pais e Devolutivas</h3>
+                  <p style={{ margin: 0, color: '#64748b', fontSize: '14px' }}>
+                    Registre orientações parentais, reuniões de alinhamento e devolutivas periódicas com os responsáveis.
+                  </p>
+                </div>
+                {!mostrarFormSessaoPais && (
+                  <button
+                    onClick={abrirNovaSessaoPais}
+                    style={{ padding: '10px 18px', backgroundColor: '#3b82f6', color: '#fff', border: 'none', borderRadius: '14px', fontWeight: 'bold', fontSize: '14px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                  >
+                    + Registrar Sessão com os Pais
+                  </button>
+                )}
+              </div>
+
+              {/* BANNER INTELIGENTE DE CONTAGEM DE SESSÕES DESDE A ÚLTIMA CONVERSA COM OS PAIS */}
+              <div style={{ backgroundColor: sessoesCriancaDesdeUltimaDevolutiva >= 4 ? '#fffbeb' : '#eff6ff', border: sessoesCriancaDesdeUltimaDevolutiva >= 4 ? '1px solid #fde68a' : '1px solid #bfdbfe', padding: '12px 16px', borderRadius: '14px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                <span style={{ fontSize: '14px', color: sessoesCriancaDesdeUltimaDevolutiva >= 4 ? '#92400e' : '#1e3a8a', fontWeight: 'bold' }}>
+                  🔔 {sessoesCriancaDesdeUltimaDevolutiva} {sessoesCriancaDesdeUltimaDevolutiva === 1 ? 'sessão realizada' : 'sessões realizadas'} com {paciente.nome} desde a última sessão com os pais
+                  {ultimaSessaoPais ? ` (última em ${ultimaSessaoPais.data})` : ' (nenhuma devolutiva registrada ainda)'}.
+                </span>
+              </div>
+
+              {mostrarFormSessaoPais && (
+                <form onSubmit={salvarSessaoPais} style={{ backgroundColor: '#f8fafc', padding: '20px', borderRadius: '16px', border: '1px solid #cbd5e1', marginBottom: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  <strong style={{ color: '#1e3a8a', fontSize: '16px' }}>
+                    {sessaoPaisEditandoId !== null ? '✏️ Editar Sessão com os Pais' : '➕ Nova Sessão de Orientação / Devolutiva'}
+                  </strong>
+                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 2fr', gap: '12px' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Data da Conversa:</label>
+                      <input
+                        type="date"
+                        value={formSessaoPais.dataISO}
+                        onChange={(e) => setFormSessaoPais({ ...formSessaoPais, dataISO: e.target.value })}
+                        style={{ width: '100%', padding: '10px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '14px', boxSizing: 'border-box' }}
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Participantes (Quem compareceu):</label>
+                      <input
+                        type="text"
+                        placeholder="Ex: Mãe (Daniele) e Avó (Solange)"
+                        value={formSessaoPais.participantes}
+                        onChange={(e) => setFormSessaoPais({ ...formSessaoPais, participantes: e.target.value })}
+                        style={{ width: '100%', padding: '10px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '14px', boxSizing: 'border-box' }}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Resumo da Devolutiva, Relatos da Família e Combinados:</label>
+                    <textarea
+                      rows="4"
+                      placeholder="Registre a visão geral passada aos pais, relatos sobre o comportamento em casa/escola e orientações combinadas..."
+                      value={formSessaoPais.resumo}
+                      onChange={(e) => setFormSessaoPais({ ...formSessaoPais, resumo: e.target.value })}
+                      style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', fontSize: '15px', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'sans-serif' }}
+                      required
+                    />
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                    <button
+                      type="button"
+                      onClick={() => { setMostrarFormSessaoPais(false); setSessaoPaisEditandoId(null); }}
+                      style={{ padding: '8px 16px', backgroundColor: '#e2e8f0', color: '#475569', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer' }}
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      style={{ padding: '8px 20px', backgroundColor: '#4ade80', color: '#166534', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer' }}
+                    >
+                      💾 Salvar Registro
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {sessoesPaisOrdenadas.length === 0 ? (
+                <p style={{ margin: 0, color: '#94a3b8', fontStyle: 'italic', textAlign: 'center', padding: '15px 0' }}>
+                  Nenhuma sessão com os pais registrada ainda.
+                </p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  {sessoesPaisOrdenadas.map(reg => (
+                    <div key={reg.id} style={{ backgroundColor: '#f8fafc', padding: '18px', borderRadius: '16px', borderLeft: '4px solid #3b82f6' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                          <strong style={{ fontSize: '16px', color: '#1e293b' }}>📅 {reg.data}</strong>
+                          <span style={{ backgroundColor: '#dbeafe', color: '#1d4ed8', padding: '3px 10px', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold' }}>
+                            👨‍👩‍👦 {reg.participantes || 'Responsáveis'}
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '6px' }}>
+                          <button
+                            onClick={() => abrirEdicaoSessaoPais(reg)}
+                            style={{ backgroundColor: '#fff', border: '1px solid #cbd5e1', color: '#475569', padding: '4px 10px', borderRadius: '10px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer' }}
+                          >
+                            ✏️ Editar
+                          </button>
+                          <button
+                            onClick={() => excluirSessaoPais(reg.id)}
+                            style={{ backgroundColor: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', padding: '4px 10px', borderRadius: '10px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer' }}
+                          >
+                            🗑️
+                          </button>
+                        </div>
+                      </div>
+                      <p style={{ margin: 0, fontSize: '15px', color: '#334155', lineHeight: '1.5', whiteSpace: 'pre-wrap' }}>
+                        {reg.resumo}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* BLOCO 2: CONTATOS DOS RESPONSÁVEIS E ACORDO FINANCEIRO */}
+            <div style={{ backgroundColor: 'rgba(255,255,255,0.85)', padding: isMobile ? '20px' : '40px', borderRadius: '25px', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px' }}>
+                <h3 style={{ margin: 0, color: '#2c3e50', fontSize: '22px' }}>Responsáveis e Acordo Financeiro</h3>
+                {!editandoFinanceiro && (
+                  <button onClick={iniciarEdicaoFinanceiro} style={{ padding: '8px 15px', backgroundColor: '#e2e8f0', color: '#475569', border: 'none', borderRadius: '10px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>
+                    ✏️ Editar
+                  </button>
+                )}
+              </div>
+
+              {editandoFinanceiro ? (
+                <form onSubmit={salvarFinanceiro} style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
+                  <div style={{ backgroundColor: '#f8fafc', padding: '20px', borderRadius: '15px', border: '1px solid #e2e8f0' }}>
+                    <h4 style={{ margin: '0 0 15px 0', color: '#4a5568', fontSize: '16px' }}>⭐ Contato Principal</h4>
+                    <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: '15px', marginBottom: '15px' }}>
+                      <div style={{ flex: 2 }}>
+                        <label style={{ display: 'block', color: '#64748b', fontSize: '12px', fontWeight: 'bold', marginBottom: '5px' }}>NOME COMPLETO *</label>
+                        <input type="text" placeholder="Ex: Roberto da Silva" value={dadosForm.responsavel1} onChange={(e) => setDadosForm({...dadosForm, responsavel1: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', outline: 'none', fontSize: '15px', boxSizing: 'border-box' }} required />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ display: 'block', color: '#64748b', fontSize: '12px', fontWeight: 'bold', marginBottom: '5px' }}>PARENTESCO *</label>
+                        <input type="text" placeholder="Ex: Pai, Avó..." value={dadosForm.parentesco1} onChange={(e) => setDadosForm({...dadosForm, parentesco1: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', outline: 'none', fontSize: '15px', boxSizing: 'border-box' }} required />
+                      </div>
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', color: '#64748b', fontSize: '12px', fontWeight: 'bold', marginBottom: '5px' }}>WHATSAPP / TELEFONE *</label>
+                      <input type="text" placeholder="(XX) XXXXX-XXXX" value={dadosForm.telefone1} onChange={(e) => handleTelefone(e, 'telefone1')} style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', outline: 'none', fontSize: '15px', boxSizing: 'border-box' }} required />
+                    </div>
+                  </div>
+
+                  <div style={{ backgroundColor: '#f8fafc', padding: '20px', borderRadius: '15px', border: '1px solid #e2e8f0' }}>
+                    <h4 style={{ margin: '0 0 15px 0', color: '#4a5568', fontSize: '16px' }}>Contato Secundário (Opcional)</h4>
+                    <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: '15px', marginBottom: '15px' }}>
+                      <div style={{ flex: 2 }}>
+                        <label style={{ display: 'block', color: '#64748b', fontSize: '12px', fontWeight: 'bold', marginBottom: '5px' }}>NOME</label>
+                        <input type="text" placeholder="Ex: Maria Souza" value={dadosForm.responsavel2} onChange={(e) => setDadosForm({...dadosForm, responsavel2: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', outline: 'none', fontSize: '15px', boxSizing: 'border-box' }} />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ display: 'block', color: '#64748b', fontSize: '12px', fontWeight: 'bold', marginBottom: '5px' }}>PARENTESCO</label>
+                        <input type="text" placeholder="Ex: Mãe" value={dadosForm.parentesco2} onChange={(e) => setDadosForm({...dadosForm, parentesco2: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', outline: 'none', fontSize: '15px', boxSizing: 'border-box' }} />
+                      </div>
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', color: '#64748b', fontSize: '12px', fontWeight: 'bold', marginBottom: '5px' }}>WHATSAPP / TELEFONE</label>
+                      <input type="text" placeholder="(XX) XXXXX-XXXX" value={dadosForm.telefone2} onChange={(e) => handleTelefone(e, 'telefone2')} style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', outline: 'none', fontSize: '15px', boxSizing: 'border-box' }} />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: '20px' }}>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ display: 'block', color: '#64748b', fontSize: '12px', fontWeight: 'bold', marginBottom: '5px' }}>VALOR POR SESSÃO</label>
+                      <input type="text" placeholder="R$ 0,00" value={dadosForm.valorSessao} onChange={handleMoeda} style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', outline: 'none', fontSize: '15px', boxSizing: 'border-box' }} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ display: 'block', color: '#64748b', fontSize: '12px', fontWeight: 'bold', marginBottom: '5px' }}>DIA DE VENCIMENTO</label>
+                      <div style={{ display: 'flex', alignItems: 'center', backgroundColor: '#fff', border: '1px solid #cbd5e1', borderRadius: '12px', padding: '0 12px' }}>
+                        <span style={{ color: '#94a3b8', marginRight: '5px' }}>Todo dia</span>
+                        <input type="text" placeholder="10" value={dadosForm.vencimento} onChange={handleDia} style={{ width: '100%', padding: '12px 0', border: 'none', outline: 'none', fontSize: '15px', backgroundColor: 'transparent' }} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', color: '#64748b', fontSize: '12px', fontWeight: 'bold', marginBottom: '5px' }}>OBSERVAÇÕES FINANCEIRAS E DE ACORDO</label>
+                    <textarea rows="4" placeholder="Adicione notas sobre pagamentos, recibos ou combinados..." value={dadosForm.observacoes} onChange={(e) => setDadosForm({...dadosForm, observacoes: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', outline: 'none', fontSize: '15px', resize: 'vertical', boxSizing: 'border-box' }} />
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '15px', justifyContent: 'flex-end', marginTop: '10px' }}>
+                    <button type="button" onClick={() => setEditandoFinanceiro(false)} style={{ padding: '12px 20px', backgroundColor: 'transparent', color: '#64748b', border: 'none', fontWeight: 'bold', cursor: 'pointer', fontSize: '16px' }}>Cancelar</button>
+                    <button type="submit" style={{ padding: '12px 30px', backgroundColor: '#4ade80', color: '#166534', border: 'none', borderRadius: '15px', fontWeight: 'bold', cursor: 'pointer', fontSize: '16px', boxShadow: '0 4px 6px rgba(0,0,0,0.05)' }}>💾 Salvar Dados</button>
+                  </div>
+                </form>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
+                  <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: '30px' }}>
+                    <div style={{ flex: 1, backgroundColor: '#f8fafc', padding: '20px', borderRadius: '15px', borderLeft: '4px solid #4ade80' }}>
+                      <span style={{ display: 'block', fontSize: '12px', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 'bold', marginBottom: '10px' }}>Contato Principal</span>
+                      {paciente.financeiro?.responsavel1 ? (
+                        <>
+                          <strong style={{ display: 'block', fontSize: '18px', color: '#334155', marginBottom: '4px' }}>{paciente.financeiro.responsavel1} <span style={{ fontSize: '14px', color: '#64748b', fontWeight: 'normal' }}>({paciente.financeiro.parentesco1})</span></strong>
+                          <span style={{ fontSize: '16px', color: '#4a5568' }}>📞 {paciente.financeiro.telefone1}</span>
+                        </>
+                      ) : (
+                        <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>Não preenchido</span>
+                      )}
+                    </div>
+                    <div style={{ flex: 1, backgroundColor: '#f8fafc', padding: '20px', borderRadius: '15px', borderLeft: '4px solid #cbd5e1' }}>
+                      <span style={{ display: 'block', fontSize: '12px', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 'bold', marginBottom: '10px' }}>Contato Secundário</span>
+                      {paciente.financeiro?.responsavel2 ? (
+                        <>
+                          <strong style={{ display: 'block', fontSize: '18px', color: '#334155', marginBottom: '4px' }}>{paciente.financeiro.responsavel2} <span style={{ fontSize: '14px', color: '#64748b', fontWeight: 'normal' }}>({paciente.financeiro.parentesco2})</span></strong>
+                          <span style={{ fontSize: '16px', color: '#4a5568' }}>📞 {paciente.financeiro.telefone2}</span>
+                        </>
+                      ) : (
+                        <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>Não preenchido</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '20px', borderTop: '1px solid #e2e8f0', paddingTop: '20px' }}>
+                    <div>
+                      <span style={{ display: 'block', fontSize: '12px', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 'bold', marginBottom: '4px' }}>Valor da Sessão</span>
+                      <strong style={{ fontSize: '20px', color: '#2e7d32' }}>{paciente.financeiro?.valorSessao || 'Não definido'}</strong>
+                    </div>
+                    <div>
+                      <span style={{ display: 'block', fontSize: '12px', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 'bold', marginBottom: '4px' }}>Vencimento</span>
+                      <strong style={{ fontSize: '20px', color: '#334155' }}>{paciente.financeiro?.vencimento ? `Todo dia ${paciente.financeiro.vencimento}` : 'Não definido'}</strong>
+                    </div>
+                  </div>
+
+                  <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '20px' }}>
+                    <span style={{ display: 'block', fontSize: '12px', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 'bold', marginBottom: '8px' }}>Observações Gerais</span>
+                    <p style={{ margin: 0, fontSize: '16px', color: paciente.financeiro?.observacoes ? '#4a5568' : '#94a3b8', lineHeight: '1.5', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                      {paciente.financeiro?.observacoes || 'Nenhuma observação registrada.'}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
