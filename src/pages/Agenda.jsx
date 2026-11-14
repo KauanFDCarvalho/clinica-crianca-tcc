@@ -509,11 +509,11 @@ export default function Agenda() {
         {modalAberto && (
           <div 
             onClick={fecharModal}
-            style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}
+            style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px', boxSizing: 'border-box' }}
           >
             <div 
               onClick={(e) => e.stopPropagation()} 
-              style={{ backgroundColor: '#fff', padding: isMobile ? '20px' : '30px', borderRadius: '25px', width: '100%', maxWidth: '520px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)', maxHeight: '90vh', overflowY: 'auto' }}
+              style={{ backgroundColor: '#fff', padding: isMobile ? '20px' : '30px', borderRadius: '25px', width: '100%', maxWidth: '520px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)', maxHeight: '90vh', overflowY: 'auto', overflowX: 'hidden', boxSizing: 'border-box' }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                 <div>
