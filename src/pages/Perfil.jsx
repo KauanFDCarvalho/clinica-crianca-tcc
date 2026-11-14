@@ -34,6 +34,7 @@ export default function Perfil() {
   const [pontoLinhaSelecionado, setPontoLinhaSelecionado] = useState(null);
   const [mostrarTodasSessoesLinha, setMostrarTodasSessoesLinha] = useState(false);
   const [mostrarTodasAtividades, setMostrarTodasAtividades] = useState(false);
+  const [gerenciandoAtividades, setGerenciandoAtividades] = useState(false);
 
   // ESTADOS DO RESUMO COM IA
   const [resumoIA, setResumoIA] = useState('');
@@ -464,6 +465,84 @@ export default function Perfil() {
     }));
   };
 
+  // --- FUNÇÕES PARA CORRIGIR / UNIFICAR OU EXCLUIR ATIVIDADES TRABALHADAS ---
+  const renomearAtividadeNoHistorico = async (nomeAntigoExibicao) => {
+    const novoNomeDigitado = window.prompt(
+      `Corrigir o nome da atividade "${nomeAntigoExibicao}" em todo o prontuário:\n\n(Dica: se você digitar o nome de uma atividade que já existe, como "Comida", as contagens serão somadas e unificadas automaticamente!)`,
+      nomeAntigoExibicao
+    );
+    if (!novoNomeDigitado) return;
+
+    const novoNomePadronizado = padronizarNomeAtividade(novoNomeDigitado);
+    const chaveAntiga = nomeAntigoExibicao.trim().replace(/\s+/g, ' ').toLowerCase();
+    if (!novoNomePadronizado || novoNomePadronizado.toLowerCase() === chaveAntiga) return;
+
+    try {
+      const novoHistorico = (paciente.historico || []).map(sessao => {
+        if (!sessao.tarefas || !Array.isArray(sessao.tarefas)) return sessao;
+        const tarefasAtualizadas = sessao.tarefas.map(t => {
+          const chaveTarefa = (t.texto || '').trim().replace(/\s+/g, ' ').toLowerCase();
+          if (chaveTarefa === chaveAntiga) {
+            return { ...t, texto: novoNomePadronizado };
+          }
+          return t;
+        });
+        return { ...sessao, tarefas: tarefasAtualizadas };
+      });
+
+      const novaRotinaAtiva = (paciente.rotina || []).map(t => {
+        const chaveTarefa = (t.texto || '').trim().replace(/\s+/g, ' ').toLowerCase();
+        if (chaveTarefa === chaveAntiga) {
+          return { ...t, texto: novoNomePadronizado };
+        }
+        return t;
+      });
+
+      const docRef = doc(db, obterNomeColecao(), id);
+      await updateDoc(docRef, {
+        historico: novoHistorico,
+        rotina: novaRotinaAtiva
+      });
+    } catch (error) {
+      console.error("Erro ao renomear atividade:", error);
+      alert("Não foi possível renomear a atividade.");
+    }
+  };
+
+  const excluirAtividadeDoHistorico = async (nomeExibicao) => {
+    const confirmar = window.confirm(
+      `Deseja remover a atividade "${nomeExibicao}" de todo o histórico de ${paciente.nome}?`
+    );
+    if (!confirmar) return;
+
+    const chaveAlvo = nomeExibicao.trim().replace(/\s+/g, ' ').toLowerCase();
+
+    try {
+      const novoHistorico = (paciente.historico || []).map(sessao => {
+        if (!sessao.tarefas || !Array.isArray(sessao.tarefas)) return sessao;
+        return {
+          ...sessao,
+          tarefas: sessao.tarefas.filter(
+            t => (t.texto || '').trim().replace(/\s+/g, ' ').toLowerCase() !== chaveAlvo
+          )
+        };
+      });
+
+      const novaRotinaAtiva = (paciente.rotina || []).filter(
+        t => (t.texto || '').trim().replace(/\s+/g, ' ').toLowerCase() !== chaveAlvo
+      );
+
+      const docRef = doc(db, obterNomeColecao(), id);
+      await updateDoc(docRef, {
+        historico: novoHistorico,
+        rotina: novaRotinaAtiva
+      });
+    } catch (error) {
+      console.error("Erro ao excluir atividade:", error);
+      alert("Não foi possível excluir a atividade.");
+    }
+  };
+
   // --- FUNÇÕES DE EDIÇÃO E EXCLUSÃO DE SESSÕES DO HISTÓRICO ---
   const abrirEdicaoSessao = (sessao) => {
     pararDitadoSeAtivo();
@@ -881,9 +960,9 @@ export default function Perfil() {
   };
 
   return (
-    <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #cde4ff 0%, #d8f5d4 100%)', padding: isMobile ? '15px' : '30px', fontFamily: 'sans-serif' }}>
+    <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #cde4ff 0%, #d8f5d4 100%)', padding: isMobile ? '15px' : '30px', fontFamily: 'sans-serif', overflowX: 'hidden', boxSizing: 'border-box' }}>
       
-      <div style={{ maxWidth: '850px', margin: '0 auto' }}>
+      <div style={{ maxWidth: '850px', margin: '0 auto', width: '100%', boxSizing: 'border-box' }}>
         
         <div style={{ marginBottom: '15px' }}>
           <button onClick={() => { pararDitadoSeAtivo(); navigate('/pacientes'); }} style={{ background: 'none', border: 'none', color: '#4a5568', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer', padding: '0', display: 'flex', alignItems: 'center', gap: '5px' }}>
@@ -991,14 +1070,16 @@ export default function Perfil() {
               </div>
 
               {tipoPeriodo === 'mes' && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '15px', backgroundColor: '#f8fafc', padding: '12px 15px', borderRadius: '15px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '15px', backgroundColor: '#f8fafc', padding: '12px 15px', borderRadius: '15px', flexWrap: 'wrap' }}>
                   <label style={{ fontWeight: 'bold', color: '#4a5568', fontSize: '14px' }}>Selecione o Mês:</label>
-                  <input 
-                    type="month" 
-                    value={mesSelecionado} 
-                    onChange={(e) => { setMesSelecionado(e.target.value); setResumoIA(''); setPaginaAtual(1); }}
-                    style={{ padding: '8px 12px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '15px', fontWeight: 'bold', color: '#2c3e50', outline: 'none' }}
-                  />
+                  <div style={{ padding: '6px 12px', borderRadius: '10px', border: '1px solid #cbd5e1', backgroundColor: '#fff', overflow: 'hidden', display: 'inline-flex', alignItems: 'center' }}>
+                    <input 
+                      type="month" 
+                      value={mesSelecionado} 
+                      onChange={(e) => { setMesSelecionado(e.target.value); setResumoIA(''); setPaginaAtual(1); }}
+                      style={{ border: 'none', padding: 0, margin: 0, fontSize: '15px', fontWeight: 'bold', color: '#2c3e50', outline: 'none', backgroundColor: 'transparent', fontFamily: 'sans-serif' }}
+                    />
+                  </div>
                 </div>
               )}
 
@@ -1018,14 +1099,18 @@ export default function Perfil() {
               )}
 
               {tipoPeriodo === 'personalizado' && (
-                <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: '12px', marginBottom: '15px', backgroundColor: '#f8fafc', padding: '15px', borderRadius: '15px' }}>
-                  <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: '12px', marginBottom: '15px', backgroundColor: '#f8fafc', padding: '15px', borderRadius: '15px', boxSizing: 'border-box' }}>
+                  <div style={{ flex: 1, minWidth: 0, width: '100%' }}>
                     <label style={{ display: 'block', color: '#4a5568', fontWeight: 'bold', marginBottom: '5px', fontSize: '13px' }}>A partir de:</label>
-                    <input type="date" value={filtroDataInicio} onChange={(e) => { setFiltroDataInicio(e.target.value); setResumoIA(''); setPaginaAtual(1); }} style={{ width: '100%', padding: '10px', borderRadius: '10px', border: '1px solid #cbd5e1', outline: 'none', boxSizing: 'border-box' }} />
+                    <div style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: '10px', border: '1px solid #cbd5e1', backgroundColor: '#fff', overflow: 'hidden', display: 'flex', alignItems: 'center', minHeight: '42px' }}>
+                      <input type="date" value={filtroDataInicio} onChange={(e) => { setFiltroDataInicio(e.target.value); setResumoIA(''); setPaginaAtual(1); }} style={{ width: '100%', minWidth: 0, padding: 0, margin: 0, border: 'none', backgroundColor: 'transparent', outline: 'none', fontSize: '14px', fontFamily: 'sans-serif' }} />
+                    </div>
                   </div>
-                  <div style={{ flex: 1 }}>
+                  <div style={{ flex: 1, minWidth: 0, width: '100%' }}>
                     <label style={{ display: 'block', color: '#4a5568', fontWeight: 'bold', marginBottom: '5px', fontSize: '13px' }}>Até:</label>
-                    <input type="date" value={filtroDataFim} onChange={(e) => { setFiltroDataFim(e.target.value); setResumoIA(''); setPaginaAtual(1); }} style={{ width: '100%', padding: '10px', borderRadius: '10px', border: '1px solid #cbd5e1', outline: 'none', boxSizing: 'border-box' }} />
+                    <div style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: '10px', border: '1px solid #cbd5e1', backgroundColor: '#fff', overflow: 'hidden', display: 'flex', alignItems: 'center', minHeight: '42px' }}>
+                      <input type="date" value={filtroDataFim} onChange={(e) => { setFiltroDataFim(e.target.value); setResumoIA(''); setPaginaAtual(1); }} style={{ width: '100%', minWidth: 0, padding: 0, margin: 0, border: 'none', backgroundColor: 'transparent', outline: 'none', fontSize: '14px', fontFamily: 'sans-serif' }} />
+                    </div>
                   </div>
                 </div>
               )}
@@ -1110,22 +1195,55 @@ export default function Perfil() {
                   </div>
 
                   <div style={{ backgroundColor: '#f8fafc', padding: '15px', borderRadius: '16px', border: '1px solid #e2e8f0' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                       <span style={{ fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: 'bold' }}>Atividades Trabalhadas</span>
-                      {todasAtividadesPeriodo.length > 5 && (
-                        <button
-                          onClick={() => setMostrarTodasAtividades(!mostrarTodasAtividades)}
-                          style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer', padding: 0 }}
-                        >
-                          {mostrarTodasAtividades ? 'Ver menos' : `+ Ver todas (${todasAtividadesPeriodo.length})`}
-                        </button>
-                      )}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        {todasAtividadesPeriodo.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setGerenciandoAtividades(!gerenciandoAtividades)}
+                            style={{ background: gerenciandoAtividades ? '#eff6ff' : 'none', border: gerenciandoAtividades ? '1px solid #93c5fd' : 'none', borderRadius: '8px', color: '#2563eb', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer', padding: gerenciandoAtividades ? '2px 6px' : 0 }}
+                            title="Renomear atividades escritas errado ou excluir"
+                          >
+                            {gerenciandoAtividades ? '✓ Concluir' : '✏️ Corrigir'}
+                          </button>
+                        )}
+                        {todasAtividadesPeriodo.length > 5 && (
+                          <button
+                            type="button"
+                            onClick={() => setMostrarTodasAtividades(!mostrarTodasAtividades)}
+                            style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer', padding: 0 }}
+                          >
+                            {mostrarTodasAtividades ? 'Ver menos' : `+ Ver todas (${todasAtividadesPeriodo.length})`}
+                          </button>
+                        )}
+                      </div>
                     </div>
                     {atividadesExibidasNoResumo.length > 0 ? (
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '8px' }}>
                         {atividadesExibidasNoResumo.map((dadosAtiv) => (
-                          <span key={dadosAtiv.nomeExibicao} style={{ backgroundColor: '#fff', border: '1px solid #cbd5e1', padding: '4px 8px', borderRadius: '8px', fontSize: '12px', color: '#334155' }}>
-                            {dadosAtiv.nomeExibicao} <strong>({dadosAtiv.concluidas}/{dadosAtiv.total}✓)</strong>
+                          <span key={dadosAtiv.nomeExibicao} style={{ backgroundColor: '#fff', border: gerenciandoAtividades ? '1px solid #93c5fd' : '1px solid #cbd5e1', padding: '4px 8px', borderRadius: '8px', fontSize: '12px', color: '#334155', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                            <span>{dadosAtiv.nomeExibicao} <strong>({dadosAtiv.concluidas}/{dadosAtiv.total}✓)</strong></span>
+                            {gerenciandoAtividades && (
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', marginLeft: '2px', borderLeft: '1px solid #e2e8f0', paddingLeft: '5px' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => renomearAtividadeNoHistorico(dadosAtiv.nomeExibicao)}
+                                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: '12px' }}
+                                  title="Editar nome (se já existir outra igual, soma automaticamente)"
+                                >
+                                  ✏️
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => excluirAtividadeDoHistorico(dadosAtiv.nomeExibicao)}
+                                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: '12px' }}
+                                  title="Excluir esta atividade do histórico"
+                                >
+                                  🗑️
+                                </button>
+                              </span>
+                            )}
                           </span>
                         ))}
                       </div>
@@ -1510,48 +1628,54 @@ export default function Perfil() {
                   const estaEditandoEstaSessao = String(sessaoEditandoId) === String(sessao.id);
 
                   return (
-                    <div key={sessao.id} style={{ border: isFalta ? '1px solid #fecaca' : 'none', borderRadius: '20px', padding: isMobile ? '20px' : '25px', backgroundColor: isFalta ? 'rgba(254, 242, 242, 0.9)' : 'rgba(255,255,255,0.8)', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
+                    <div key={sessao.id} style={{ border: isFalta ? '1px solid #fecaca' : 'none', borderRadius: '20px', padding: isMobile ? '20px' : '25px', backgroundColor: isFalta ? 'rgba(254, 242, 242, 0.9)' : 'rgba(255,255,255,0.8)', boxShadow: '0 4px 6px rgba(0,0,0,0.02)', overflow: 'hidden', boxSizing: 'border-box' }}>
                       {estaEditandoEstaSessao ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', width: '100%', boxSizing: 'border-box' }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px' }}>
                             <strong style={{ fontSize: '17px', color: '#1e3a8a' }}>✏️ Editando Registro do Prontuário</strong>
                             <button onClick={() => { pararDitadoSeAtivo(); setSessaoEditandoId(null); }} style={{ background: 'none', border: 'none', color: '#64748b', fontSize: '18px', cursor: 'pointer' }}>✕</button>
                           </div>
 
-                          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.2fr 1fr 1fr 1.2fr', gap: '12px' }}>
-                            <div>
+                          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.2fr 1fr 1fr 1.2fr', gap: '12px', width: '100%', boxSizing: 'border-box' }}>
+                            <div style={{ minWidth: 0, width: '100%' }}>
                               <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Data da Consulta:</label>
-                              <input
-                                type="date"
-                                value={formEdicaoSessao.dataISO}
-                                onChange={(e) => setFormEdicaoSessao({ ...formEdicaoSessao, dataISO: e.target.value })}
-                                style={{ width: '100%', padding: '10px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '14px', boxSizing: 'border-box' }}
-                              />
+                              <div style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: '10px', border: '1px solid #cbd5e1', backgroundColor: '#fff', overflow: 'hidden', display: 'flex', alignItems: 'center', minHeight: '42px' }}>
+                                <input
+                                  type="date"
+                                  value={formEdicaoSessao.dataISO}
+                                  onChange={(e) => setFormEdicaoSessao({ ...formEdicaoSessao, dataISO: e.target.value })}
+                                  style={{ width: '100%', minWidth: 0, padding: 0, margin: 0, border: 'none', backgroundColor: 'transparent', fontSize: '14px', outline: 'none', fontFamily: 'sans-serif', color: '#1e293b' }}
+                                />
+                              </div>
                             </div>
-                            <div>
+                            <div style={{ minWidth: 0, width: '100%' }}>
                               <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Início:</label>
-                              <input
-                                type="time"
-                                value={formEdicaoSessao.horaInicio}
-                                onChange={(e) => setFormEdicaoSessao({ ...formEdicaoSessao, horaInicio: e.target.value })}
-                                style={{ width: '100%', padding: '10px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '14px', boxSizing: 'border-box' }}
-                              />
+                              <div style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: '10px', border: '1px solid #cbd5e1', backgroundColor: '#fff', overflow: 'hidden', display: 'flex', alignItems: 'center', minHeight: '42px' }}>
+                                <input
+                                  type="time"
+                                  value={formEdicaoSessao.horaInicio}
+                                  onChange={(e) => setFormEdicaoSessao({ ...formEdicaoSessao, horaInicio: e.target.value })}
+                                  style={{ width: '100%', minWidth: 0, padding: 0, margin: 0, border: 'none', backgroundColor: 'transparent', fontSize: '14px', outline: 'none', fontFamily: 'sans-serif', color: '#1e293b' }}
+                                />
+                              </div>
                             </div>
-                            <div>
+                            <div style={{ minWidth: 0, width: '100%' }}>
                               <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Término:</label>
-                              <input
-                                type="time"
-                                value={formEdicaoSessao.horaFim}
-                                onChange={(e) => setFormEdicaoSessao({ ...formEdicaoSessao, horaFim: e.target.value })}
-                                style={{ width: '100%', padding: '10px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '14px', boxSizing: 'border-box' }}
-                              />
+                              <div style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: '10px', border: '1px solid #cbd5e1', backgroundColor: '#fff', overflow: 'hidden', display: 'flex', alignItems: 'center', minHeight: '42px' }}>
+                                <input
+                                  type="time"
+                                  value={formEdicaoSessao.horaFim}
+                                  onChange={(e) => setFormEdicaoSessao({ ...formEdicaoSessao, horaFim: e.target.value })}
+                                  style={{ width: '100%', minWidth: 0, padding: 0, margin: 0, border: 'none', backgroundColor: 'transparent', fontSize: '14px', outline: 'none', fontFamily: 'sans-serif', color: '#1e293b' }}
+                                />
+                              </div>
                             </div>
-                            <div>
+                            <div style={{ minWidth: 0, width: '100%' }}>
                               <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Status / Emoção:</label>
                               <select
                                 value={formEdicaoSessao.emocao}
                                 onChange={(e) => setFormEdicaoSessao({ ...formEdicaoSessao, emocao: e.target.value })}
-                                style={{ width: '100%', padding: '10px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '14px', backgroundColor: '#fff', boxSizing: 'border-box' }}
+                                style={{ width: '100%', minHeight: '42px', padding: '9px 10px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '14px', backgroundColor: '#fff', boxSizing: 'border-box', outline: 'none' }}
                               >
                                 {opcoesEmocoesEdicao.map(emoOp => (
                                   <option key={emoOp} value={emoOp}>{coresEmocoes[emoOp]?.emoji} {emoOp}</option>
@@ -1690,7 +1814,7 @@ export default function Perfil() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
             
             {/* BLOCO 1: OBJETIVOS TERAPÊUTICOS (PEI / METAS CLÍNICAS) */}
-            <div style={{ backgroundColor: 'rgba(255,255,255,0.85)', padding: isMobile ? '20px' : '35px', borderRadius: '25px', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
+            <div style={{ backgroundColor: 'rgba(255,255,255,0.85)', padding: isMobile ? '20px' : '35px', borderRadius: '25px', boxShadow: '0 4px 6px rgba(0,0,0,0.02)', boxSizing: 'border-box', overflow: 'hidden' }}>
               <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', gap: '10px', marginBottom: '20px' }}>
                 <div>
                   <h3 style={{ margin: '0 0 4px 0', color: '#2c3e50', fontSize: '22px' }}>🎯 Plano de Objetivos Terapêuticos</h3>
@@ -1718,7 +1842,8 @@ export default function Perfil() {
                   flexDirection: isMobile ? 'column' : 'row',
                   gap: '10px',
                   marginBottom: '20px',
-                  width: '100%'
+                  width: '100%',
+                  boxSizing: 'border-box'
                 }}
               >
                 <input
@@ -1780,7 +1905,7 @@ export default function Perfil() {
                         gap: '12px'
                       }}
                     >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flex: 1 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flex: 1, minWidth: 0 }}>
                         <div
                           style={{
                             width: '26px',
@@ -1798,8 +1923,8 @@ export default function Perfil() {
                         >
                           {obj.concluido ? '✓' : ''}
                         </div>
-                        <div>
-                          <span style={{ fontSize: '16px', fontWeight: 'bold', color: obj.concluido ? '#166534' : '#1e293b', textDecoration: obj.concluido ? 'line-through' : 'none', display: 'block' }}>
+                        <div style={{ minWidth: 0 }}>
+                          <span style={{ fontSize: '16px', fontWeight: 'bold', color: obj.concluido ? '#166534' : '#1e293b', textDecoration: obj.concluido ? 'line-through' : 'none', display: 'block', wordBreak: 'break-word' }}>
                             {obj.texto}
                           </span>
                           <span style={{ fontSize: '12px', color: '#64748b' }}>
@@ -1813,7 +1938,7 @@ export default function Perfil() {
                           e.stopPropagation();
                           removerObjetivoTerapeutico(obj.id);
                         }}
-                        style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '18px', cursor: 'pointer', padding: '4px' }}
+                        style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '18px', cursor: 'pointer', padding: '4px', flexShrink: 0 }}
                         title="Remover objetivo"
                       >
                         🗑️
@@ -1825,7 +1950,7 @@ export default function Perfil() {
             </div>
 
             {/* BLOCO 2: FICHA DE ANAMNESE E HISTÓRICO CLÍNICO DO PACIENTE */}
-            <div style={{ backgroundColor: 'rgba(255,255,255,0.85)', padding: isMobile ? '20px' : '35px', borderRadius: '25px', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
+            <div style={{ backgroundColor: 'rgba(255,255,255,0.85)', padding: isMobile ? '20px' : '35px', borderRadius: '25px', boxShadow: '0 4px 6px rgba(0,0,0,0.02)', boxSizing: 'border-box', overflow: 'hidden' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px', flexWrap: 'wrap', gap: '10px' }}>
                 <div>
                   <h3 style={{ margin: '0 0 4px 0', color: '#2c3e50', fontSize: '22px' }}>📋 Ficha de Anamnese e Histórico do Paciente</h3>
@@ -1873,16 +1998,16 @@ export default function Perfil() {
 
                   {/* TÓPICOS EXTRAS PERSONALIZADOS DA ANAMNESE */}
                   {(formAnamnese.topicosExtras || []).map((topico, idx) => (
-                    <div key={topico.id} style={{ backgroundColor: '#f8fafc', padding: '15px', borderRadius: '14px', border: '1px solid #cbd5e1' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', marginBottom: '8px', flexWrap: 'wrap' }}>
+                    <div key={topico.id} style={{ backgroundColor: '#f8fafc', padding: '15px', borderRadius: '14px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}>
+                      <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: isMobile ? 'stretch' : 'center', gap: '10px', marginBottom: '8px' }}>
                         <input
                           type="text"
                           placeholder={`Título do tópico extra ${idx + 6} (Ex: Medicações em uso, Exames...)`}
                           value={topico.titulo}
                           onChange={(e) => atualizarTopicoExtraAnamnese(topico.id, 'titulo', e.target.value)}
-                          style={{ flex: 1, padding: '8px 12px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '14px', fontWeight: 'bold' }}
+                          style={{ flex: 1, width: '100%', minWidth: 0, boxSizing: 'border-box', padding: '8px 12px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '14px', fontWeight: 'bold' }}
                         />
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px' }}>
                           {renderBotaoDitado(`extra_${topico.id}`, topico.conteudo, (novoTxt) =>
                             atualizarTopicoExtraAnamnese(topico.id, 'conteudo', novoTxt)
                           )}
@@ -1908,12 +2033,12 @@ export default function Perfil() {
                   <button
                     type="button"
                     onClick={adicionarTopicoExtraAnamnese}
-                    style={{ background: 'none', border: '1px dashed #3b82f6', color: '#2563eb', padding: '12px', borderRadius: '14px', fontWeight: 'bold', fontSize: '14px', cursor: 'pointer' }}
+                    style={{ background: 'none', border: '1px dashed #3b82f6', color: '#2563eb', padding: '12px', borderRadius: '14px', fontWeight: 'bold', fontSize: '14px', cursor: 'pointer', width: '100%', boxSizing: 'border-box' }}
                   >
                     + Adicionar tópico personalizado na Anamnese
                   </button>
 
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '8px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '8px', flexWrap: 'wrap' }}>
                     <button
                       type="button"
                       onClick={() => {
@@ -1950,7 +2075,7 @@ export default function Perfil() {
                       <span style={{ display: 'block', fontSize: '12px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '6px' }}>
                         {secao.titulo}
                       </span>
-                      <p style={{ margin: 0, fontSize: '15px', color: secao.valor ? '#334155' : '#94a3b8', fontStyle: secao.valor ? 'normal' : 'italic', lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>
+                      <p style={{ margin: 0, fontSize: '15px', color: secao.valor ? '#334155' : '#94a3b8', fontStyle: secao.valor ? 'normal' : 'italic', lineHeight: '1.6', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                         {secao.valor || 'Não preenchido. Clique em "Editar Anamnese" para registrar.'}
                       </p>
                     </div>
@@ -1971,7 +2096,7 @@ export default function Perfil() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
             
             {/* BLOCO 1: SESSÕES COM OS PAIS / DEVOLUTIVAS E ORIENTAÇÃO PARENTAL */}
-            <div style={{ backgroundColor: 'rgba(255,255,255,0.85)', padding: isMobile ? '20px' : '35px', borderRadius: '25px', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
+            <div style={{ backgroundColor: 'rgba(255,255,255,0.85)', padding: isMobile ? '20px' : '35px', borderRadius: '25px', boxShadow: '0 4px 6px rgba(0,0,0,0.02)', boxSizing: 'border-box', overflow: 'hidden' }}>
               <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', gap: '12px', marginBottom: '18px' }}>
                 <div>
                   <h3 style={{ margin: '0 0 4px 0', color: '#2c3e50', fontSize: '22px' }}>🗣️ Sessões com os Pais e Devolutivas</h3>
@@ -1982,7 +2107,7 @@ export default function Perfil() {
                 {!mostrarFormSessaoPais && (
                   <button
                     onClick={abrirNovaSessaoPais}
-                    style={{ padding: '10px 18px', backgroundColor: '#3b82f6', color: '#fff', border: 'none', borderRadius: '14px', fontWeight: 'bold', fontSize: '14px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                    style={{ padding: '10px 18px', backgroundColor: '#3b82f6', color: '#fff', border: 'none', borderRadius: '14px', fontWeight: 'bold', fontSize: '14px', cursor: 'pointer', whiteSpace: 'nowrap', width: isMobile ? '100%' : 'auto' }}
                   >
                     + Registrar Sessão com os Pais
                   </button>
@@ -1998,29 +2123,31 @@ export default function Perfil() {
               </div>
 
               {mostrarFormSessaoPais && (
-                <form onSubmit={salvarSessaoPais} style={{ backgroundColor: '#f8fafc', padding: '20px', borderRadius: '16px', border: '1px solid #cbd5e1', marginBottom: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <form onSubmit={salvarSessaoPais} style={{ backgroundColor: '#f8fafc', padding: '20px', borderRadius: '16px', border: '1px solid #cbd5e1', marginBottom: '20px', display: 'flex', flexDirection: 'column', gap: '14px', boxSizing: 'border-box' }}>
                   <strong style={{ color: '#1e3a8a', fontSize: '16px' }}>
                     {sessaoPaisEditandoId !== null ? '✏️ Editar Sessão com os Pais' : '➕ Nova Sessão de Orientação / Devolutiva'}
                   </strong>
-                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 2fr', gap: '12px' }}>
-                    <div>
+                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 2fr', gap: '12px', width: '100%', boxSizing: 'border-box' }}>
+                    <div style={{ minWidth: 0, width: '100%' }}>
                       <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Data da Conversa:</label>
-                      <input
-                        type="date"
-                        value={formSessaoPais.dataISO}
-                        onChange={(e) => setFormSessaoPais({ ...formSessaoPais, dataISO: e.target.value })}
-                        style={{ width: '100%', padding: '10px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '14px', boxSizing: 'border-box' }}
-                        required
-                      />
+                      <div style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: '10px', border: '1px solid #cbd5e1', backgroundColor: '#fff', overflow: 'hidden', display: 'flex', alignItems: 'center', minHeight: '42px' }}>
+                        <input
+                          type="date"
+                          value={formSessaoPais.dataISO}
+                          onChange={(e) => setFormSessaoPais({ ...formSessaoPais, dataISO: e.target.value })}
+                          style={{ width: '100%', minWidth: 0, padding: 0, margin: 0, border: 'none', backgroundColor: 'transparent', fontSize: '14px', outline: 'none', fontFamily: 'sans-serif', color: '#1e293b' }}
+                          required
+                        />
+                      </div>
                     </div>
-                    <div>
+                    <div style={{ minWidth: 0, width: '100%' }}>
                       <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Participantes (Quem compareceu):</label>
                       <input
                         type="text"
                         placeholder="Ex: Mãe (Daniele) e Avó (Solange)"
                         value={formSessaoPais.participantes}
                         onChange={(e) => setFormSessaoPais({ ...formSessaoPais, participantes: e.target.value })}
-                        style={{ width: '100%', padding: '10px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '14px', boxSizing: 'border-box' }}
+                        style={{ width: '100%', minWidth: 0, minHeight: '42px', padding: '9px 12px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '14px', boxSizing: 'border-box', backgroundColor: '#fff' }}
                       />
                     </div>
                   </div>
@@ -2090,7 +2217,7 @@ export default function Perfil() {
                           </button>
                         </div>
                       </div>
-                      <p style={{ margin: 0, fontSize: '15px', color: '#334155', lineHeight: '1.5', whiteSpace: 'pre-wrap' }}>
+                      <p style={{ margin: 0, fontSize: '15px', color: '#334155', lineHeight: '1.5', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                         {reg.resumo}
                       </p>
                     </div>
@@ -2100,7 +2227,7 @@ export default function Perfil() {
             </div>
 
             {/* BLOCO 2: CONTATOS DOS RESPONSÁVEIS E ACORDO FINANCEIRO */}
-            <div style={{ backgroundColor: 'rgba(255,255,255,0.85)', padding: isMobile ? '20px' : '40px', borderRadius: '25px', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
+            <div style={{ backgroundColor: 'rgba(255,255,255,0.85)', padding: isMobile ? '20px' : '40px', borderRadius: '25px', boxShadow: '0 4px 6px rgba(0,0,0,0.02)', boxSizing: 'border-box', overflow: 'hidden' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px' }}>
                 <h3 style={{ margin: 0, color: '#2c3e50', fontSize: '22px' }}>Responsáveis e Acordo Financeiro</h3>
                 {!editandoFinanceiro && (
@@ -2163,12 +2290,17 @@ export default function Perfil() {
                   </div>
 
                   <div>
-                    <label style={{ display: 'block', color: '#64748b', fontSize: '12px', fontWeight: 'bold', marginBottom: '5px' }}>OBSERVAÇÕES FINANCEIRAS E DE ACORDO</label>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                      <label style={{ color: '#64748b', fontSize: '12px', fontWeight: 'bold' }}>OBSERVAÇÕES FINANCEIRAS E DE ACORDO</label>
+                      {renderBotaoDitado('fin_obs', dadosForm.observacoes, (novoTxt) =>
+                        setDadosForm(prev => ({ ...prev, observacoes: novoTxt }))
+                      )}
+                    </div>
                     <textarea rows="4" placeholder="Adicione notas sobre pagamentos, recibos ou combinados..." value={dadosForm.observacoes} onChange={(e) => setDadosForm({...dadosForm, observacoes: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', outline: 'none', fontSize: '15px', resize: 'vertical', boxSizing: 'border-box' }} />
                   </div>
 
                   <div style={{ display: 'flex', gap: '15px', justifyContent: 'flex-end', marginTop: '10px' }}>
-                    <button type="button" onClick={() => setEditandoFinanceiro(false)} style={{ padding: '12px 20px', backgroundColor: 'transparent', color: '#64748b', border: 'none', fontWeight: 'bold', cursor: 'pointer', fontSize: '16px' }}>Cancelar</button>
+                    <button type="button" onClick={() => { pararDitadoSeAtivo(); setEditandoFinanceiro(false); }} style={{ padding: '12px 20px', backgroundColor: 'transparent', color: '#64748b', border: 'none', fontWeight: 'bold', cursor: 'pointer', fontSize: '16px' }}>Cancelar</button>
                     <button type="submit" style={{ padding: '12px 30px', backgroundColor: '#4ade80', color: '#166534', border: 'none', borderRadius: '15px', fontWeight: 'bold', cursor: 'pointer', fontSize: '16px', boxShadow: '0 4px 6px rgba(0,0,0,0.05)' }}>💾 Salvar Dados</button>
                   </div>
                 </form>

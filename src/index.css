@@ -4,10 +4,14 @@
   box-sizing: border-box;
 }
 
-body, html, #root {
+html, body, #root {
   width: 100%;
   min-height: 100vh;
   margin: 0;
   padding: 0;
-  background-color: #fff; /* Fundo base para não sobrar nada transparente */
+  /* Cor base e gradiente para acompanhar as barras superior e inferior do celular */
+  background-color: #d8f5d4;
+  background-image: linear-gradient(135deg, #cde4ff 0%, #d8f5d4 100%);
+  background-attachment: fixed;
+  overflow-x: hidden;
 }
