@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -59,9 +59,16 @@ export default function Perfil() {
     desenvolvimento: '',
     historicoEscolar: '',
     dinamicaFamiliar: '',
-    interessesSensorial: ''
+    interessesSensorial: '',
+    topicosExtras: []
   });
   const [novoObjetivoTexto, setNovoObjetivoTexto] = useState('');
+
+  // ESTADOS DO DITADO POR VOZ NO PRONTUÁRIO
+  const [campoGravando, setCampoGravando] = useState(null);
+  const reconhecedorRef = useRef(null);
+  const textoBaseRef = useRef('');
+  const callbackTextoRef = useRef(null);
 
   // ESTADOS DO FINANCEIRO, RESPONSÁVEIS E SESSÕES COM OS PAIS
   const [editandoFinanceiro, setEditandoFinanceiro] = useState(false);
@@ -97,6 +104,86 @@ export default function Perfil() {
     });
     return () => unsubAuth();
   }, []);
+
+  useEffect(() => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      const rec = new SpeechRecognition();
+      rec.lang = 'pt-BR';
+      rec.continuous = true;
+      rec.interimResults = true;
+
+      rec.onresult = (event) => {
+        let transcricao = '';
+        for (let i = 0; i < event.results.length; i++) {
+          transcricao += event.results[i][0].transcript;
+        }
+        const espaco = textoBaseRef.current ? ' ' : '';
+        if (callbackTextoRef.current) {
+          callbackTextoRef.current(textoBaseRef.current + espaco + transcricao);
+        }
+      };
+
+      rec.onerror = () => setCampoGravando(null);
+      rec.onend = () => setCampoGravando(null);
+      reconhecedorRef.current = rec;
+    }
+    return () => {
+      if (reconhecedorRef.current) reconhecedorRef.current.stop();
+    };
+  }, []);
+
+  const pararDitadoSeAtivo = () => {
+    if (campoGravando && reconhecedorRef.current) {
+      reconhecedorRef.current.stop();
+      setCampoGravando(null);
+    }
+  };
+
+  const alternarDitadoCampo = (idCampo, valorAtual, atualizarValor) => {
+    if (!reconhecedorRef.current) {
+      alert("Seu navegador não suporta ditado por voz direto, mas você pode usar o microfone do teclado!");
+      return;
+    }
+    if (campoGravando === idCampo) {
+      reconhecedorRef.current.stop();
+      setCampoGravando(null);
+      return;
+    }
+    if (campoGravando) {
+      reconhecedorRef.current.stop();
+    }
+    textoBaseRef.current = valorAtual || '';
+    callbackTextoRef.current = atualizarValor;
+    setCampoGravando(idCampo);
+    reconhecedorRef.current.start();
+  };
+
+  const renderBotaoDitado = (idCampo, valorAtual, atualizarValor) => {
+    const gravandoEste = campoGravando === idCampo;
+    return (
+      <button
+        type="button"
+        onClick={() => alternarDitadoCampo(idCampo, valorAtual, atualizarValor)}
+        style={{
+          backgroundColor: gravandoEste ? '#ef4444' : '#eff6ff',
+          color: gravandoEste ? '#fff' : '#1d4ed8',
+          border: gravandoEste ? 'none' : '1px solid #93c5fd',
+          padding: '4px 10px',
+          borderRadius: '10px',
+          fontSize: '11px',
+          fontWeight: 'bold',
+          cursor: 'pointer',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '4px'
+        }}
+        title="Ditar texto por voz"
+      >
+        {gravandoEste ? '🛑 Parar ditado' : '🎙️ Ditar'}
+      </button>
+    );
+  };
 
   useEffect(() => {
     const docRef = doc(db, colecaoAtual, id);
@@ -379,6 +466,7 @@ export default function Perfil() {
 
   // --- FUNÇÕES DE EDIÇÃO E EXCLUSÃO DE SESSÕES DO HISTÓRICO ---
   const abrirEdicaoSessao = (sessao) => {
+    pararDitadoSeAtivo();
     const [parteData, parteHorario] = (sessao.data || '').split(' - ');
     let dataISO = '';
     if (parteData && parteData.includes('/')) {
@@ -413,6 +501,7 @@ export default function Perfil() {
   };
 
   const salvarEdicaoSessao = async (sessaoId) => {
+    pararDitadoSeAtivo();
     if (!formEdicaoSessao.dataISO) {
       alert("Por favor, informe a data da sessão.");
       return;
@@ -473,23 +562,52 @@ export default function Perfil() {
 
   // --- FUNÇÕES DE ANAMNESE E OBJETIVOS TERAPÊUTICOS ---
   const iniciarEdicaoAnamnese = () => {
+    pararDitadoSeAtivo();
     setFormAnamnese({
       queixaInicial: paciente.anamnese?.queixaInicial || '',
       desenvolvimento: paciente.anamnese?.desenvolvimento || '',
       historicoEscolar: paciente.anamnese?.historicoEscolar || '',
       dinamicaFamiliar: paciente.anamnese?.dinamicaFamiliar || '',
-      interessesSensorial: paciente.anamnese?.interessesSensorial || ''
+      interessesSensorial: paciente.anamnese?.interessesSensorial || '',
+      topicosExtras: paciente.anamnese?.topicosExtras ? [...paciente.anamnese.topicosExtras] : []
     });
     setEditandoAnamnese(true);
   };
 
+  const adicionarTopicoExtraAnamnese = () => {
+    const listaAtual = formAnamnese.topicosExtras || [];
+    const novoId = listaAtual.reduce((maior, item) => Math.max(maior, Number(item.id) || 0), 0) + 1;
+    setFormAnamnese({
+      ...formAnamnese,
+      topicosExtras: [...listaAtual, { id: novoId, titulo: '', conteudo: '' }]
+    });
+  };
+
+  const atualizarTopicoExtraAnamnese = (idTopico, campo, valor) => {
+    const novaLista = (formAnamnese.topicosExtras || []).map(item =>
+      item.id === idTopico ? { ...item, [campo]: valor } : item
+    );
+    setFormAnamnese({ ...formAnamnese, topicosExtras: novaLista });
+  };
+
+  const removerTopicoExtraAnamnese = (idTopico) => {
+    pararDitadoSeAtivo();
+    const novaLista = (formAnamnese.topicosExtras || []).filter(item => item.id !== idTopico);
+    setFormAnamnese({ ...formAnamnese, topicosExtras: novaLista });
+  };
+
   const salvarAnamnese = async (e) => {
     e.preventDefault();
+    pararDitadoSeAtivo();
     try {
+      const topicosLimpos = (formAnamnese.topicosExtras || []).filter(
+        t => (t.titulo && t.titulo.trim()) || (t.conteudo && t.conteudo.trim())
+      );
       const docRef = doc(db, obterNomeColecao(), id);
       await updateDoc(docRef, {
         anamnese: {
           ...formAnamnese,
+          topicosExtras: topicosLimpos,
           ultimaAtualizacao: new Date().toLocaleDateString('pt-BR')
         }
       });
@@ -559,6 +677,7 @@ export default function Perfil() {
 
   // --- FUNÇÕES DE SESSÕES COM OS PAIS / DEVOLUTIVAS ---
   const abrirNovaSessaoPais = () => {
+    pararDitadoSeAtivo();
     const respPadrao = [paciente.financeiro?.responsavel1, paciente.financeiro?.responsavel2]
       .filter(Boolean)
       .join(' e ');
@@ -572,6 +691,7 @@ export default function Perfil() {
   };
 
   const abrirEdicaoSessaoPais = (registro) => {
+    pararDitadoSeAtivo();
     let dataISO = HOJE_ISO_PADRAO;
     if (registro.data && registro.data.includes('/')) {
       const [d, m, y] = registro.data.split('/');
@@ -588,6 +708,7 @@ export default function Perfil() {
 
   const salvarSessaoPais = async (e) => {
     e.preventDefault();
+    pararDitadoSeAtivo();
     if (!formSessaoPais.dataISO || !formSessaoPais.resumo.trim()) {
       alert("Por favor, preencha a data e o resumo da conversa com os pais.");
       return;
@@ -731,6 +852,7 @@ export default function Perfil() {
   };
 
   const iniciarEdicaoFinanceiro = () => {
+    pararDitadoSeAtivo();
     setDadosForm({
       responsavel1: paciente.financeiro?.responsavel1 || '',
       parentesco1: paciente.financeiro?.parentesco1 || '',
@@ -747,6 +869,7 @@ export default function Perfil() {
 
   const salvarFinanceiro = async (e) => {
     e.preventDefault();
+    pararDitadoSeAtivo();
     try {
       const docRef = doc(db, obterNomeColecao(), id);
       await updateDoc(docRef, { financeiro: dadosForm });
@@ -763,7 +886,7 @@ export default function Perfil() {
       <div style={{ maxWidth: '850px', margin: '0 auto' }}>
         
         <div style={{ marginBottom: '15px' }}>
-          <button onClick={() => navigate('/pacientes')} style={{ background: 'none', border: 'none', color: '#4a5568', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer', padding: '0', display: 'flex', alignItems: 'center', gap: '5px' }}>
+          <button onClick={() => { pararDitadoSeAtivo(); navigate('/pacientes'); }} style={{ background: 'none', border: 'none', color: '#4a5568', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer', padding: '0', display: 'flex', alignItems: 'center', gap: '5px' }}>
             ← Voltar aos perfis
           </button>
         </div>
@@ -792,7 +915,7 @@ export default function Perfil() {
           </div>
           
           <button 
-            onClick={() => navigate(montarUrlIniciarSessao())}
+            onClick={() => { pararDitadoSeAtivo(); navigate(montarUrlIniciarSessao()); }}
             style={{ padding: '15px 30px', backgroundColor: '#4ade80', color: '#166534', border: 'none', borderRadius: '15px', fontSize: '18px', fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 4px 6px rgba(0,0,0,0.05)', width: isMobile ? '100%' : 'auto', whiteSpace: 'nowrap' }}
           >
             ▶ Iniciar Sessão
@@ -802,19 +925,19 @@ export default function Perfil() {
         {/* BARRA DE NAVEGAÇÃO EM 3 ABAS */}
         <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: '8px', marginBottom: '25px', backgroundColor: 'rgba(255,255,255,0.45)', padding: '8px', borderRadius: '20px' }}>
           <button 
-            onClick={() => setAbaAtiva('prontuario')}
+            onClick={() => { pararDitadoSeAtivo(); setAbaAtiva('prontuario'); }}
             style={{ flex: 1, padding: '12px', borderRadius: '15px', border: 'none', fontWeight: 'bold', fontSize: '15px', cursor: 'pointer', transition: 'all 0.2s', backgroundColor: abaAtiva === 'prontuario' ? '#fff' : 'transparent', color: abaAtiva === 'prontuario' ? '#2c3e50' : '#64748b', boxShadow: abaAtiva === 'prontuario' ? '0 4px 6px rgba(0,0,0,0.05)' : 'none' }}
           >
             📊 Prontuário & Evolução
           </button>
           <button 
-            onClick={() => setAbaAtiva('anamnese')}
+            onClick={() => { pararDitadoSeAtivo(); setAbaAtiva('anamnese'); }}
             style={{ flex: 1, padding: '12px', borderRadius: '15px', border: 'none', fontWeight: 'bold', fontSize: '15px', cursor: 'pointer', transition: 'all 0.2s', backgroundColor: abaAtiva === 'anamnese' ? '#fff' : 'transparent', color: abaAtiva === 'anamnese' ? '#2c3e50' : '#64748b', boxShadow: abaAtiva === 'anamnese' ? '0 4px 6px rgba(0,0,0,0.05)' : 'none' }}
           >
             📋 Anamnese & Objetivos
           </button>
           <button 
-            onClick={() => setAbaAtiva('financeiro')}
+            onClick={() => { pararDitadoSeAtivo(); setAbaAtiva('financeiro'); }}
             style={{ flex: 1, padding: '12px', borderRadius: '15px', border: 'none', fontWeight: 'bold', fontSize: '15px', cursor: 'pointer', transition: 'all 0.2s', backgroundColor: abaAtiva === 'financeiro' ? '#fff' : 'transparent', color: abaAtiva === 'financeiro' ? '#2c3e50' : '#64748b', boxShadow: abaAtiva === 'financeiro' ? '0 4px 6px rgba(0,0,0,0.05)' : 'none' }}
           >
             👨‍👩‍👦 Pais & Devolutivas
@@ -1392,7 +1515,7 @@ export default function Perfil() {
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px' }}>
                             <strong style={{ fontSize: '17px', color: '#1e3a8a' }}>✏️ Editando Registro do Prontuário</strong>
-                            <button onClick={() => setSessaoEditandoId(null)} style={{ background: 'none', border: 'none', color: '#64748b', fontSize: '18px', cursor: 'pointer' }}>✕</button>
+                            <button onClick={() => { pararDitadoSeAtivo(); setSessaoEditandoId(null); }} style={{ background: 'none', border: 'none', color: '#64748b', fontSize: '18px', cursor: 'pointer' }}>✕</button>
                           </div>
 
                           <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.2fr 1fr 1fr 1.2fr', gap: '12px' }}>
@@ -1438,9 +1561,14 @@ export default function Perfil() {
                           </div>
 
                           <div>
-                            <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>
-                              {formEdicaoSessao.emocao === 'Falta' ? 'Motivo / Observações da Falta:' : 'Anotações da Terapeuta:'}
-                            </label>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                              <label style={{ fontSize: '12px', fontWeight: 'bold', color: '#475569' }}>
+                                {formEdicaoSessao.emocao === 'Falta' ? 'Motivo / Observações da Falta:' : 'Anotações da Terapeuta:'}
+                              </label>
+                              {renderBotaoDitado('edicao_sessao', formEdicaoSessao.observacoes, (novoTxt) =>
+                                setFormEdicaoSessao(prev => ({ ...prev, observacoes: novoTxt }))
+                              )}
+                            </div>
                             <textarea
                               rows="4"
                               value={formEdicaoSessao.observacoes}
@@ -1453,7 +1581,7 @@ export default function Perfil() {
                           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
                             <button
                               type="button"
-                              onClick={() => setSessaoEditandoId(null)}
+                              onClick={() => { pararDitadoSeAtivo(); setSessaoEditandoId(null); }}
                               style={{ padding: '8px 16px', backgroundColor: '#e2e8f0', color: '#475569', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px' }}
                             >
                               Cancelar
@@ -1686,75 +1814,81 @@ export default function Perfil() {
 
               {editandoAnamnese ? (
                 <form onSubmit={salvarAnamnese} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                  <div>
-                    <label style={{ display: 'block', color: '#475569', fontSize: '13px', fontWeight: 'bold', marginBottom: '6px', textTransform: 'uppercase' }}>
-                      1. Queixa Inicial, Demanda e Encaminhamento
-                    </label>
-                    <textarea
-                      rows="3"
-                      placeholder="Motivo da busca pela psicoterapia, quem encaminhou, hipóteses diagnósticas ou laudos (TEA, TDAH)..."
-                      value={formAnamnese.queixaInicial}
-                      onChange={(e) => setFormAnamnese({ ...formAnamnese, queixaInicial: e.target.value })}
-                      style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', fontSize: '15px', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'sans-serif' }}
-                    />
-                  </div>
+                  {[
+                    { campo: 'queixaInicial', label: '1. Queixa Inicial, Demanda e Encaminhamento', placeholder: 'Motivo da busca pela psicoterapia, quem encaminhou, hipóteses diagnósticas ou laudos (TEA, TDAH)...' },
+                    { campo: 'desenvolvimento', label: '2. Gestação, Parto e Desenvolvimento Neuropsicomotor (Fala, Marcha, Sono, Alimentação)', placeholder: 'Marcos do desenvolvimento, primeiras palavras, seletividade alimentar, qualidade do sono...' },
+                    { campo: 'historicoEscolar', label: '3. Histórico Escolar, Adaptação e Socialização com Pares', placeholder: 'Escola atual, série, presença de mediador/acompanhante escolar, interação com outras crianças...' },
+                    { campo: 'dinamicaFamiliar', label: '4. Antecedentes, Dinâmica Familiar e Rotina em Casa', placeholder: 'Com quem a criança reside, relação com pais/irmãos, rotina doméstica e acompanhamentos multidisciplinares (fono, TO, neuropediatra)...' },
+                    { campo: 'interessesSensorial', label: '5. Hiperfocos, Interesses da Criança e Perfil Sensorial (Gatilhos e Reguladores)', placeholder: 'Personagens/brincadeiras favoritas, sensibilidade a barulhos ou texturas, o que ajuda a acalmar em momentos de crise...' }
+                  ].map((item) => (
+                    <div key={item.campo}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', gap: '8px', flexWrap: 'wrap' }}>
+                        <label style={{ color: '#475569', fontSize: '13px', fontWeight: 'bold', textTransform: 'uppercase' }}>
+                          {item.label}
+                        </label>
+                        {renderBotaoDitado(`anam_${item.campo}`, formAnamnese[item.campo], (novoTxt) =>
+                          setFormAnamnese(prev => ({ ...prev, [item.campo]: novoTxt }))
+                        )}
+                      </div>
+                      <textarea
+                        rows="3"
+                        placeholder={item.placeholder}
+                        value={formAnamnese[item.campo]}
+                        onChange={(e) => setFormAnamnese({ ...formAnamnese, [item.campo]: e.target.value })}
+                        style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', fontSize: '15px', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'sans-serif' }}
+                      />
+                    </div>
+                  ))}
 
-                  <div>
-                    <label style={{ display: 'block', color: '#475569', fontSize: '13px', fontWeight: 'bold', marginBottom: '6px', textTransform: 'uppercase' }}>
-                      2. Gestação, Parto e Desenvolvimento Neuropsicomotor (Fala, Marcha, Sono, Alimentação)
-                    </label>
-                    <textarea
-                      rows="3"
-                      placeholder="Marcos do desenvolvimento, primeiras palavras, seletividade alimentar, qualidade do sono..."
-                      value={formAnamnese.desenvolvimento}
-                      onChange={(e) => setFormAnamnese({ ...formAnamnese, desenvolvimento: e.target.value })}
-                      style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', fontSize: '15px', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'sans-serif' }}
-                    />
-                  </div>
+                  {/* TÓPICOS EXTRAS PERSONALIZADOS DA ANAMNESE */}
+                  {(formAnamnese.topicosExtras || []).map((topico, idx) => (
+                    <div key={topico.id} style={{ backgroundColor: '#f8fafc', padding: '15px', borderRadius: '14px', border: '1px solid #cbd5e1' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', marginBottom: '8px', flexWrap: 'wrap' }}>
+                        <input
+                          type="text"
+                          placeholder={`Título do tópico extra ${idx + 6} (Ex: Medicações em uso, Exames...)`}
+                          value={topico.titulo}
+                          onChange={(e) => atualizarTopicoExtraAnamnese(topico.id, 'titulo', e.target.value)}
+                          style={{ flex: 1, padding: '8px 12px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '14px', fontWeight: 'bold' }}
+                        />
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          {renderBotaoDitado(`extra_${topico.id}`, topico.conteudo, (novoTxt) =>
+                            atualizarTopicoExtraAnamnese(topico.id, 'conteudo', novoTxt)
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => removerTopicoExtraAnamnese(topico.id)}
+                            style={{ backgroundColor: '#fee2e2', color: '#dc2626', border: 'none', padding: '6px 10px', borderRadius: '10px', fontWeight: 'bold', fontSize: '12px', cursor: 'pointer' }}
+                          >
+                            🗑️ Remover
+                          </button>
+                        </div>
+                      </div>
+                      <textarea
+                        rows="3"
+                        placeholder="Preencha ou dite as informações deste tópico..."
+                        value={topico.conteudo}
+                        onChange={(e) => atualizarTopicoExtraAnamnese(topico.id, 'conteudo', e.target.value)}
+                        style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', fontSize: '15px', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'sans-serif' }}
+                      />
+                    </div>
+                  ))}
 
-                  <div>
-                    <label style={{ display: 'block', color: '#475569', fontSize: '13px', fontWeight: 'bold', marginBottom: '6px', textTransform: 'uppercase' }}>
-                      3. Histórico Escolar, Adaptação e Socialização com Pares
-                    </label>
-                    <textarea
-                      rows="3"
-                      placeholder="Escola atual, série, presença de mediador/acompanhante escolar, interação com outras crianças..."
-                      value={formAnamnese.historicoEscolar}
-                      onChange={(e) => setFormAnamnese({ ...formAnamnese, historicoEscolar: e.target.value })}
-                      style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', fontSize: '15px', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'sans-serif' }}
-                    />
-                  </div>
-
-                  <div>
-                    <label style={{ display: 'block', color: '#475569', fontSize: '13px', fontWeight: 'bold', marginBottom: '6px', textTransform: 'uppercase' }}>
-                      4. Antecedentes, Dinâmica Familiar e Rotina em Casa
-                    </label>
-                    <textarea
-                      rows="3"
-                      placeholder="Com quem a criança reside, relação com pais/irmãos, rotina doméstica e acompanhamentos multidisciplinares (fono, TO, neuropediatra)..."
-                      value={formAnamnese.dinamicaFamiliar}
-                      onChange={(e) => setFormAnamnese({ ...formAnamnese, dinamicaFamiliar: e.target.value })}
-                      style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', fontSize: '15px', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'sans-serif' }}
-                    />
-                  </div>
-
-                  <div>
-                    <label style={{ display: 'block', color: '#475569', fontSize: '13px', fontWeight: 'bold', marginBottom: '6px', textTransform: 'uppercase' }}>
-                      5. Hiperfocos, Interesses da Criança e Perfil Sensorial (Gatilhos e Reguladores)
-                    </label>
-                    <textarea
-                      rows="3"
-                      placeholder="Personagens/brincadeiras favoritas, sensibilidade a barulhos ou texturas, o que ajuda a acalmar em momentos de crise..."
-                      value={formAnamnese.interessesSensorial}
-                      onChange={(e) => setFormAnamnese({ ...formAnamnese, interessesSensorial: e.target.value })}
-                      style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', fontSize: '15px', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'sans-serif' }}
-                    />
-                  </div>
+                  <button
+                    type="button"
+                    onClick={adicionarTopicoExtraAnamnese}
+                    style={{ background: 'none', border: '1px dashed #3b82f6', color: '#2563eb', padding: '12px', borderRadius: '14px', fontWeight: 'bold', fontSize: '14px', cursor: 'pointer' }}
+                  >
+                    + Adicionar tópico personalizado na Anamnese
+                  </button>
 
                   <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '8px' }}>
                     <button
                       type="button"
-                      onClick={() => setEditandoAnamnese(false)}
+                      onClick={() => {
+                        pararDitadoSeAtivo();
+                        setEditandoAnamnese(false);
+                      }}
                       style={{ padding: '12px 20px', backgroundColor: 'transparent', color: '#64748b', border: 'none', fontWeight: 'bold', cursor: 'pointer', fontSize: '15px' }}
                     >
                       Cancelar
@@ -1774,7 +1908,12 @@ export default function Perfil() {
                     { titulo: '2. Gestação e Desenvolvimento Neuropsicomotor', valor: paciente.anamnese?.desenvolvimento, cor: '#10b981' },
                     { titulo: '3. Histórico Escolar e Socialização', valor: paciente.anamnese?.historicoEscolar, cor: '#f59e0b' },
                     { titulo: '4. Dinâmica Familiar e Acompanhamento Multidisciplinar', valor: paciente.anamnese?.dinamicaFamiliar, cor: '#8b5cf6' },
-                    { titulo: '5. Hiperfocos, Interesses e Perfil Sensorial (Gatilhos/Reguladores)', valor: paciente.anamnese?.interessesSensorial, cor: '#ec4899' }
+                    { titulo: '5. Hiperfocos, Interesses e Perfil Sensorial (Gatilhos/Reguladores)', valor: paciente.anamnese?.interessesSensorial, cor: '#ec4899' },
+                    ...(paciente.anamnese?.topicosExtras || []).map((t, i) => ({
+                      titulo: `${i + 6}. ${t.titulo || 'Tópico Complementar'}`,
+                      valor: t.conteudo,
+                      cor: '#06b6d4'
+                    }))
                   ].map((secao) => (
                     <div key={secao.titulo} style={{ backgroundColor: '#f8fafc', padding: '18px', borderRadius: '15px', borderLeft: `4px solid ${secao.cor}` }}>
                       <span style={{ display: 'block', fontSize: '12px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '6px' }}>
@@ -1855,7 +1994,14 @@ export default function Perfil() {
                     </div>
                   </div>
                   <div>
-                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#475569', marginBottom: '4px' }}>Resumo da Devolutiva, Relatos da Família e Combinados:</label>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                      <label style={{ fontSize: '12px', fontWeight: 'bold', color: '#475569' }}>
+                        Resumo da Devolutiva, Relatos da Família e Combinados:
+                      </label>
+                      {renderBotaoDitado('sessao_pais', formSessaoPais.resumo, (novoTxt) =>
+                        setFormSessaoPais(prev => ({ ...prev, resumo: novoTxt }))
+                      )}
+                    </div>
                     <textarea
                       rows="4"
                       placeholder="Registre a visão geral passada aos pais, relatos sobre o comportamento em casa/escola e orientações combinadas..."
@@ -1868,7 +2014,7 @@ export default function Perfil() {
                   <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
                     <button
                       type="button"
-                      onClick={() => { setMostrarFormSessaoPais(false); setSessaoPaisEditandoId(null); }}
+                      onClick={() => { pararDitadoSeAtivo(); setMostrarFormSessaoPais(false); setSessaoPaisEditandoId(null); }}
                       style={{ padding: '8px 16px', backgroundColor: '#e2e8f0', color: '#475569', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer' }}
                     >
                       Cancelar
