@@ -1711,17 +1711,48 @@ export default function Perfil() {
                 </div>
               )}
 
-              <form onSubmit={adicionarObjetivoTerapeutico} style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
+              <form
+                onSubmit={adicionarObjetivoTerapeutico}
+                style={{
+                  display: 'flex',
+                  flexDirection: isMobile ? 'column' : 'row',
+                  gap: '10px',
+                  marginBottom: '20px',
+                  width: '100%'
+                }}
+              >
                 <input
                   type="text"
-                  placeholder="Ex: Identificar e verbalizar frustração sem desregulação motora..."
+                  placeholder="Ex: Identificar e verbalizar frustração..."
                   value={novoObjetivoTexto}
                   onChange={(e) => setNovoObjetivoTexto(e.target.value)}
-                  style={{ flex: 1, padding: '14px', borderRadius: '14px', border: '1px solid #cbd5e1', fontSize: '15px', outline: 'none' }}
+                  style={{
+                    flex: 1,
+                    width: '100%',
+                    minWidth: 0,
+                    boxSizing: 'border-box',
+                    padding: '14px',
+                    borderRadius: '14px',
+                    border: '1px solid #cbd5e1',
+                    fontSize: '15px',
+                    outline: 'none'
+                  }}
                 />
                 <button
                   type="submit"
-                  style={{ padding: '0 22px', backgroundColor: '#3b82f6', color: '#fff', border: 'none', borderRadius: '14px', fontWeight: 'bold', fontSize: '15px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                  style={{
+                    padding: isMobile ? '14px' : '0 22px',
+                    width: isMobile ? '100%' : 'auto',
+                    boxSizing: 'border-box',
+                    backgroundColor: '#3b82f6',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '14px',
+                    fontWeight: 'bold',
+                    fontSize: '15px',
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap'
+                  }}
                 >
                   + Adicionar Meta
                 </button>
