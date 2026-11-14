@@ -670,26 +670,28 @@ export default function Agenda() {
                   )}
                 </div>
               ) : (
-                <form onSubmit={salvarAgendamento} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-                  <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: '12px', width: '100%' }}>
-                    <div style={{ flex: 1, minWidth: 0, width: '100%' }}>
+                <form onSubmit={salvarAgendamento} style={{ display: 'flex', flexDirection: 'column', gap: '15px', width: '100%', boxSizing: 'border-box' }}>
+                  <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: '12px', width: '100%', boxSizing: 'border-box' }}>
+                    <div style={{ flex: 1, minWidth: 0, width: '100%', boxSizing: 'border-box' }}>
                       <label style={{ display: 'block', color: '#4a5568', fontWeight: 'bold', marginBottom: '5px', fontSize: '14px' }}>Horário da Sessão:</label>
-                      <input 
-                        type="time" 
-                        value={formAgendamento.hora} 
-                        onChange={(e) => setFormAgendamento({...formAgendamento, hora: e.target.value})} 
-                        style={{ display: 'block', width: '100%', maxWidth: '100%', minWidth: 0, minHeight: '45px', padding: '10px 12px', borderRadius: '12px', border: '1px solid #cbd5e1', backgroundColor: '#f8fafc', color: '#2c3e50', outline: 'none', fontSize: '15px', boxSizing: 'border-box' }} 
-                      />
+                      <div style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', borderRadius: '12px', border: '1px solid #cbd5e1', backgroundColor: '#f8fafc', overflow: 'hidden', display: 'flex', alignItems: 'center', minHeight: '46px' }}>
+                        <input 
+                          type="time" 
+                          value={formAgendamento.hora} 
+                          onChange={(e) => setFormAgendamento({...formAgendamento, hora: e.target.value})} 
+                          style={{ width: '100%', minWidth: 0, padding: 0, margin: 0, border: 'none', backgroundColor: 'transparent', color: '#2c3e50', outline: 'none', fontSize: '15px', fontFamily: 'sans-serif' }} 
+                        />
+                      </div>
                     </div>
 
-                    <div style={{ flex: 1.3, minWidth: 0, width: '100%' }}>
+                    <div style={{ flex: 1.3, minWidth: 0, width: '100%', boxSizing: 'border-box' }}>
                       <label style={{ display: 'block', color: '#4a5568', fontWeight: 'bold', marginBottom: '5px', fontSize: '14px' }}>
                         🔁 Repetição Semanal ({nomeDiaSemanaModal}):
                       </label>
                       <select
                         value={formAgendamento.semanasRepeticao}
                         onChange={(e) => setFormAgendamento({ ...formAgendamento, semanasRepeticao: Number(e.target.value) })}
-                        style={{ display: 'block', width: '100%', maxWidth: '100%', minWidth: 0, minHeight: '45px', padding: '10px 12px', borderRadius: '12px', border: '1px solid #cbd5e1', outline: 'none', fontSize: '14px', backgroundColor: '#f8fafc', cursor: 'pointer', boxSizing: 'border-box', fontWeight: 'bold', color: '#1e3a8a' }}
+                        style={{ display: 'block', width: '100%', maxWidth: '100%', minWidth: 0, minHeight: '46px', padding: '10px 12px', borderRadius: '12px', border: '1px solid #cbd5e1', outline: 'none', fontSize: '14px', backgroundColor: '#f8fafc', cursor: 'pointer', boxSizing: 'border-box', fontWeight: 'bold', color: '#1e3a8a' }}
                       >
                         <option value={1}>Apenas neste dia ({diaSelecionado})</option>
                         <option value={4}>Toda {nomeDiaSemanaModal} (4 semanas)</option>
