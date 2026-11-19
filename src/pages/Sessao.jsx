@@ -704,7 +704,7 @@ export default function Sessao() {
 
         <div style={{ backgroundColor: 'rgba(255,255,255,0.7)', padding: isMobile ? '20px' : '30px', borderRadius: '25px', boxShadow: '0 4px 6px rgba(0,0,0,0.02)', marginBottom: '40px' }}>
           <h3 style={{ marginTop: 0, textAlign: 'center', color: '#2c3e50', fontSize: '22px' }}>Trilha Terapêutica</h3>
-          <p style={{ color: '#64748b', fontSize: '16px', textAlign: 'center' }}>Clique na próxima casa para avançar com o avatar.</p>
+          <p style={{ color: '#64748b', fontSize: '16px', textAlign: 'center' }}>Marque o progresso da sessão ou use como apoio visual para dados e cartinhas físicas na mesa.</p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '15px', justifyContent: 'center', marginTop: '30px' }}>
             {casinhasDoTabuleiro.map((casa) => (
               <div key={casa} onClick={() => moverAvatar(casa)} style={{ width: isMobile ? '55px' : '70px', height: isMobile ? '55px' : '70px', borderRadius: '15px', border: posicaoTabuleiro === casa ? '4px solid #4ade80' : '2px dashed #cbd5e1', backgroundColor: posicaoTabuleiro === casa ? '#f0fdf4' : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: posicaoTabuleiro === casa ? '30px' : '40px', fontWeight: 'bold', color: '#94a3b8', cursor: 'pointer', transition: 'all 0.2s' }}>
