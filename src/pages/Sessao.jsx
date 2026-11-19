@@ -719,7 +719,7 @@ export default function Sessao() {
             <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', marginBottom: '15px', gap: '15px' }}>
               <div>
                 <p style={{ margin: '0 0 5px 0', color: '#4a5568', fontWeight: 'bold', fontSize: '18px' }}>Anotações da Sessão</p>
-                <p style={{ margin: 0, color: '#94a3b8', fontSize: '14px' }}>Registre os detalhes das dinâmicas e o comportamento da criança.</p>
+                <p style={{ margin: 0, color: '#94a3b8', fontSize: '14px' }}>Registre em texto os detalhes das dinâmicas (o ditado apenas converte voz em texto, sem gravar áudio).</p>
               </div>
               <button onClick={toggleGravacao} style={{ background: isGravando ? '#ef4444' : '#3b82f6', color: 'white', border: 'none', borderRadius: '20px', padding: '10px 20px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
                 {isGravando ? '🛑 Finalizar Ditado' : '🎙️ Ditar Observações'}
@@ -844,7 +844,7 @@ export default function Sessao() {
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontSize: '16px', color: '#334155' }}>
                   <input type="checkbox" checked={iaUsarAnotacoes} onChange={(e) => setIaUsarAnotacoes(e.target.checked)} style={{ width: '20px', height: '20px', cursor: 'pointer' }} />
-                  Usar minhas anotações ditadas (metáfora lúdica sem dados sensíveis)
+                  Incluir o texto das anotações da sessão (em metáfora lúdica, sem dados sensíveis)
                 </label>
               </div>
 
